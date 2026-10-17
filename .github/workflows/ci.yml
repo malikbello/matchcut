@@ -70,5 +70,5 @@ jobs:
       - uses: astral-sh/setup-uv@v6
       - name: Audit locked dependencies for known vulnerabilities
         run: |
-          uv export --locked --no-hashes --format requirements-txt > requirements-audit.txt
+          uv export --locked --no-hashes --no-emit-workspace --format requirements-txt > requirements-audit.txt
           uvx pip-audit --strict -r requirements-audit.txt

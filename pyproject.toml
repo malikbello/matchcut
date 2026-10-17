@@ -9,7 +9,7 @@ readme = "README.md"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/*", "services/*"]
+members = ["packages/contracts", "services/sim"]
 
 [tool.uv.sources]
 matchcut-contracts = { workspace = true }
