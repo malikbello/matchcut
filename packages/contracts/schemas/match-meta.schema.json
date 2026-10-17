@@ -1,0 +1,110 @@
+{
+  "$id": "https://matchcut.dev/schemas/1.0.0/match-meta.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "away_bench": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Away Bench",
+      "type": "array"
+    },
+    "away_club_id": {
+      "title": "Away Club Id",
+      "type": "string"
+    },
+    "away_formation": {
+      "title": "Away Formation",
+      "type": "string"
+    },
+    "away_lineup": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 11,
+      "minItems": 11,
+      "title": "Away Lineup",
+      "type": "array"
+    },
+    "competition": {
+      "title": "Competition",
+      "type": "string"
+    },
+    "ground": {
+      "title": "Ground",
+      "type": "string"
+    },
+    "home_bench": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Home Bench",
+      "type": "array"
+    },
+    "home_club_id": {
+      "title": "Home Club Id",
+      "type": "string"
+    },
+    "home_formation": {
+      "title": "Home Formation",
+      "type": "string"
+    },
+    "home_lineup": {
+      "items": {
+        "type": "string"
+      },
+      "maxItems": 11,
+      "minItems": 11,
+      "title": "Home Lineup",
+      "type": "array"
+    },
+    "match_id": {
+      "title": "Match Id",
+      "type": "string"
+    },
+    "matchday": {
+      "maximum": 38,
+      "minimum": 1,
+      "title": "Matchday",
+      "type": "integer"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "season": {
+      "title": "Season",
+      "type": "string"
+    },
+    "seed": {
+      "title": "Seed",
+      "type": "integer"
+    },
+    "synthetic": {
+      "const": true,
+      "default": true,
+      "title": "Synthetic",
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "match_id",
+    "competition",
+    "season",
+    "matchday",
+    "home_club_id",
+    "away_club_id",
+    "ground",
+    "seed",
+    "home_formation",
+    "away_formation",
+    "home_lineup",
+    "away_lineup",
+    "home_bench",
+    "away_bench"
+  ],
+  "title": "MatchMeta",
+  "type": "object"
+}

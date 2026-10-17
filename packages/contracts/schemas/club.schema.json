@@ -1,0 +1,163 @@
+{
+  "$defs": {
+    "Kit": {
+      "additionalProperties": false,
+      "properties": {
+        "number": {
+          "description": "Shirt number colour",
+          "pattern": "^#[0-9A-F]{6}$",
+          "title": "Number",
+          "type": "string"
+        },
+        "primary": {
+          "description": "Shirt colour",
+          "pattern": "^#[0-9A-F]{6}$",
+          "title": "Primary",
+          "type": "string"
+        },
+        "secondary": {
+          "description": "Trim and shorts",
+          "pattern": "^#[0-9A-F]{6}$",
+          "title": "Secondary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "primary",
+        "secondary",
+        "number"
+      ],
+      "title": "Kit",
+      "type": "object"
+    },
+    "TeamStyle": {
+      "additionalProperties": false,
+      "description": "Tactical identity in 0..1. Drives the match engine and is part of the hidden truth.",
+      "properties": {
+        "defensive_line": {
+          "description": "0 = deep block, 1 = high line",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Defensive Line",
+          "type": "number"
+        },
+        "directness": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Directness",
+          "type": "number"
+        },
+        "press_intensity": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Press Intensity",
+          "type": "number"
+        },
+        "risk": {
+          "description": "Appetite for forward, low-percentage passes",
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Risk",
+          "type": "number"
+        },
+        "tempo": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Tempo",
+          "type": "number"
+        },
+        "width": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Width",
+          "type": "number"
+        }
+      },
+      "required": [
+        "press_intensity",
+        "directness",
+        "width",
+        "tempo",
+        "defensive_line",
+        "risk"
+      ],
+      "title": "TeamStyle",
+      "type": "object"
+    }
+  },
+  "$id": "https://matchcut.dev/schemas/1.0.0/club.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "away_kit": {
+      "$ref": "#/$defs/Kit"
+    },
+    "city": {
+      "title": "City",
+      "type": "string"
+    },
+    "club_id": {
+      "pattern": "^[a-z]{3}$",
+      "title": "Club Id",
+      "type": "string"
+    },
+    "formation": {
+      "enum": [
+        "4-3-3",
+        "4-2-3-1",
+        "4-4-2",
+        "3-4-3",
+        "5-3-2"
+      ],
+      "title": "Formation",
+      "type": "string"
+    },
+    "founded": {
+      "maximum": 2020,
+      "minimum": 1860,
+      "title": "Founded",
+      "type": "integer"
+    },
+    "ground": {
+      "title": "Ground",
+      "type": "string"
+    },
+    "home_kit": {
+      "$ref": "#/$defs/Kit"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "rating": {
+      "description": "Overall squad strength",
+      "maximum": 95,
+      "minimum": 40,
+      "title": "Rating",
+      "type": "integer"
+    },
+    "short_name": {
+      "pattern": "^[A-Z]{3}$",
+      "title": "Short Name",
+      "type": "string"
+    },
+    "style": {
+      "$ref": "#/$defs/TeamStyle"
+    }
+  },
+  "required": [
+    "club_id",
+    "name",
+    "short_name",
+    "city",
+    "ground",
+    "founded",
+    "home_kit",
+    "away_kit",
+    "style",
+    "rating",
+    "formation"
+  ],
+  "title": "Club",
+  "type": "object"
+}

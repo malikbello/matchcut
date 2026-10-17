@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Lint, types, tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install (locked)
+        run: uv sync --locked
+      - name: Format check
+        run: uv run ruff format --check .
+      - name: Lint
+        run: uv run ruff check . --output-format github
+      - name: Type check
+        run: uv run pyright
+      - name: Contracts are in sync with schemas
+        run: uv run python -m matchcut_contracts.export --check
+      - name: Tests with coverage (gate 80%)
+        run: uv run pytest --cov --cov-report=term --cov-report=xml
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.xml
+          retention-days: 7
+
+  realism-smoke:
+    name: Realism smoke (2 full matches)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --locked
+      - name: Simulate and report
+        run: uv run matchcut-sim realism --matches 2 --out realism-smoke.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: realism-smoke
+          path: realism-smoke.md
+          retention-days: 7
+
+  dependency-audit:
+    name: Dependency audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Audit locked dependencies for known vulnerabilities
+        run: |
+          uv export --locked --no-hashes --no-emit-workspace --format requirements-txt > requirements-audit.txt
+          uvx pip-audit --strict -r requirements-audit.txt

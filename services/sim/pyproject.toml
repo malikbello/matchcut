@@ -1,0 +1,16 @@
+[project]
+name = "matchcut-sim"
+version = "0.1.0"
+description = "Synthetic league universe and agent-based match engine with 10 Hz tracking and hidden truth."
+requires-python = ">=3.12"
+dependencies = ["matchcut-contracts", "numpy>=2.1"]
+
+[project.scripts]
+matchcut-sim = "matchcut_sim.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/matchcut_sim"]
