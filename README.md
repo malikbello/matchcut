@@ -12,6 +12,20 @@
 
 Details, the numbered flow and design decisions: [docs/architecture](docs/architecture/README.md).
 
+## Run it yourself
+
+Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed automatically.
+
+```bash
+uv sync                                   # install the locked workspace
+uv run matchcut-sim league                # 20 clubs, 500 players, 2 seasons of history -> data/league
+uv run matchcut-sim match --home kes --away irv --seed 7   # one full match: events, 10 Hz tracking, truth
+uv run matchcut-sim realism --matches 12  # compare simulated matches with top-flight norms
+uv run pytest                             # tests
+```
+
+The same seed always produces the same match. [Latest realism report](reports/realism.md).
+
 ## Brand
 
 [Brand system](docs/brand/brand-system.md) · [brand board](docs/brand/brand-board.png)

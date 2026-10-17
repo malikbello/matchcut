@@ -1,0 +1,129 @@
+{
+  "$defs": {
+    "Foot": {
+      "enum": [
+        "left",
+        "right"
+      ],
+      "title": "Foot",
+      "type": "string"
+    },
+    "Position": {
+      "enum": [
+        "GK",
+        "CB",
+        "FB",
+        "DM",
+        "CM",
+        "AM",
+        "W",
+        "ST"
+      ],
+      "title": "Position",
+      "type": "string"
+    }
+  },
+  "$id": "https://matchcut.dev/schemas/1.0.0/player.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "birth_year": {
+      "maximum": 2010,
+      "minimum": 1980,
+      "title": "Birth Year",
+      "type": "integer"
+    },
+    "club_id": {
+      "title": "Club Id",
+      "type": "string"
+    },
+    "defending": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Defending",
+      "type": "integer"
+    },
+    "dribbling": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Dribbling",
+      "type": "integer"
+    },
+    "foot": {
+      "$ref": "#/$defs/Foot"
+    },
+    "goalkeeping": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Goalkeeping",
+      "type": "integer"
+    },
+    "known_as": {
+      "description": "Name used on screen, usually the surname",
+      "title": "Known As",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "pace": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Pace",
+      "type": "integer"
+    },
+    "passing": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Passing",
+      "type": "integer"
+    },
+    "player_id": {
+      "description": "<club_id>-<shirt number>",
+      "pattern": "^[a-z]{3}-\\d{2}$",
+      "title": "Player Id",
+      "type": "string"
+    },
+    "position": {
+      "$ref": "#/$defs/Position"
+    },
+    "shirt_number": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Shirt Number",
+      "type": "integer"
+    },
+    "shooting": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Shooting",
+      "type": "integer"
+    },
+    "stamina": {
+      "maximum": 99,
+      "minimum": 1,
+      "title": "Stamina",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "player_id",
+    "club_id",
+    "name",
+    "known_as",
+    "shirt_number",
+    "position",
+    "foot",
+    "birth_year",
+    "pace",
+    "passing",
+    "shooting",
+    "dribbling",
+    "defending",
+    "stamina",
+    "goalkeeping"
+  ],
+  "title": "Player",
+  "type": "object"
+}
