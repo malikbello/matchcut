@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="940" viewBox="0 0 1680 940" role="img" aria-labelledby="t d">
+<title id="t">How Matchcut works</title>
+<desc id="d">Four stages: a fictional league plays a live match; code measures and agents explain; fans see verified live graphics; after the whistle every fan gets their own voiced highlights film. A trust layer checks everything, and it runs on Microsoft Azure.</desc>
+<defs>
+<style>
+.f{font-family:'Segoe UI',Inter,system-ui,-apple-system,Helvetica,Arial,sans-serif}
+.k{font:700 12px 'Segoe UI',Inter,system-ui,sans-serif;letter-spacing:2px;fill:#7A8594}
+.n{font:800 44px 'Segoe UI',Inter,system-ui,sans-serif;fill:#E2E6EB;letter-spacing:-1px}
+.h{font:700 23px 'Segoe UI',Inter,system-ui,sans-serif;fill:#0C1016;letter-spacing:-.3px}
+.b{font:400 14.5px 'Segoe UI',Inter,system-ui,sans-serif;fill:#3B4552}
+.s{font:600 13px 'Segoe UI',Inter,system-ui,sans-serif;fill:#0C1016}
+.m{font:400 13px 'Segoe UI',Inter,system-ui,sans-serif;fill:#5B6573}
+</style>
+</defs>
+<rect width="1680" height="940" fill="#F6F7F9"/>
+
+<!-- Header -->
+<g transform="translate(64,58)">
+  <rect x="0" y="-26" width="34" height="29" rx="7" fill="none" stroke="#0C1016" stroke-width="3"/>
+  <line x1="11" y1="5" x2="20" y2="-28" stroke="#F6F7F9" stroke-width="6"/>
+  <line x1="12" y1="2" x2="19" y2="-24" stroke="#FF4A2E" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="25" cy="-11" r="3.4" fill="#0C1016"/>
+  <text x="48" y="0" style="font:800 26px 'Segoe UI',Inter,sans-serif;letter-spacing:1px" fill="#0C1016">MATCHCUT</text>
+</g>
+<text class="f" x="64" y="104" style="font:700 34px 'Segoe UI',Inter,sans-serif;letter-spacing:-.5px" fill="#0C1016">How it works: one match, a different story for every fan</text>
+<text class="f" x="64" y="134" style="font:400 16px 'Segoe UI',Inter,sans-serif" fill="#5B6573">For fans in every market, studio producers and broadcasters · functional view (no technology detail) · v1 · 17 Oct 2026</text>
+
+<!-- Stage cards -->
+<g>
+  <rect x="64" y="172" width="356" height="452" rx="18" fill="#FFFFFF" stroke="#E3E7EC"/>
+  <text class="k" x="92" y="208">THE MATCH</text><text class="n" x="340" y="214">01</text>
+  <text class="h" x="92" y="252">A fictional league</text><text class="h" x="92" y="282">plays a live match</text>
+  <text class="b" x="92" y="326">20 clubs with full squads and styles,</text>
+  <text class="b" x="92" y="348">plus two seasons of history.</text>
+  <text class="b" x="92" y="384">Every player and the ball tracked</text>
+  <text class="b" x="92" y="406">10 times a second.</text>
+  <text class="b" x="92" y="442">A virtual TV camera films it all.</text>
+  <rect x="92" y="540" width="300" height="56" rx="10" fill="#F6F7F9"/>
+  <text class="s" x="110" y="563">Synthetic by design</text>
+  <text class="m" x="110" y="583">No real players, clubs or footage</text>
+</g>
+<g>
+  <rect x="452" y="172" width="356" height="452" rx="18" fill="#FFFFFF" stroke="#E3E7EC"/>
+  <text class="k" x="480" y="208">UNDERSTAND</text><text class="n" x="728" y="214">02</text>
+  <text class="h" x="480" y="252">Code measures.</text><text class="h" x="480" y="282">Agents explain.</text>
+  <text class="b" x="480" y="326">Stats engine: chance quality, pressure,</text>
+  <text class="b" x="480" y="348">momentum, speeds.</text>
+  <text class="b" x="480" y="384">The camera feed is read by vision AI</text>
+  <text class="b" x="480" y="406">to detect events on its own.</text>
+  <text class="b" x="480" y="442">Analyst and Historian agents say why</text>
+  <text class="b" x="480" y="464">it matters and what it means.</text>
+  <rect x="480" y="540" width="300" height="56" rx="10" fill="#EAFBF4"/>
+  <circle cx="500" cy="568" r="8" fill="#2DE3A0"/><path d="M496 568l3 3 5-6" stroke="#0C1016" stroke-width="2" fill="none"/>
+  <text class="s" x="518" y="563">A verifier checks every claim</text>
+  <text class="m" x="518" y="583">Wrong number? Rewritten or held</text>
+</g>
+<g>
+  <rect x="840" y="172" width="356" height="452" rx="18" fill="#FFFFFF" stroke="#E3E7EC"/>
+  <text class="k" x="868" y="208">THE LIVE CUT</text><text class="n" x="1116" y="214">03</text>
+  <text class="h" x="868" y="252">Graphics in sync</text><text class="h" x="868" y="282">with the pictures</text>
+  <text class="b" x="868" y="326">Score bug, player tags, insight and</text>
+  <text class="b" x="868" y="348">milestone cards, on time.</text>
+  <text class="b" x="868" y="384">Casual or analyst, your club, your</text>
+  <text class="b" x="868" y="406">player, five languages.</text>
+  <text class="b" x="868" y="442">Tap any card to see the evidence.</text>
+  <rect x="868" y="540" width="300" height="56" rx="10" fill="#F6F7F9"/>
+  <text class="s" x="886" y="563">Plain card in 0.3 s</text>
+  <text class="m" x="886" y="583">Checked AI card replaces it in &lt; 6 s</text>
+</g>
+<g>
+  <rect x="1228" y="172" width="388" height="452" rx="18" fill="#0C1016"/>
+  <text class="k" x="1256" y="208" style="fill:#FF4A2E">THE FINAL CUT</text><text class="n" x="1536" y="214" style="fill:#212A35">04</text>
+  <text class="h" x="1256" y="252" style="fill:#F4F6F9">Every fan's own film,</text><text class="h" x="1256" y="282" style="fill:#F4F6F9">minutes after the whistle</text>
+  <text class="b" x="1256" y="326" style="fill:#C9D2DD">Agents pick your moments, plan the</text>
+  <text class="b" x="1256" y="348" style="fill:#C9D2DD">shots and write to the pictures.</text>
+  <text class="b" x="1256" y="384" style="fill:#C9D2DD">Voiced and captioned in your</text>
+  <text class="b" x="1256" y="406" style="fill:#C9D2DD">language, in 16:9 and 9:16.</text>
+  <text class="b" x="1256" y="442" style="fill:#C9D2DD">QA listens and looks before it ships.</text>
+  <rect x="1256" y="540" width="332" height="56" rx="10" fill="#141A22"/>
+  <text class="s" x="1274" y="563" style="fill:#F4F6F9">24 films · first in under 90 s</text>
+  <text class="m" x="1274" y="583" style="fill:#9AA6B5">Share to stories and status</text>
+</g>
+
+<!-- chevrons -->
+<g fill="#FF4A2E">
+  <path d="M428 392l12 10-12 10z"/><path d="M816 392l12 10-12 10z"/><path d="M1204 392l12 10-12 10z"/>
+</g>
+
+<!-- Trust layer -->
+<rect x="64" y="656" width="1552" height="104" rx="18" fill="#FFFFFF" stroke="#E3E7EC"/>
+<text class="k" x="92" y="690">TRUST LAYER · WHY YOU CAN BELIEVE IT</text>
+<g class="f">
+  <circle cx="100" cy="725" r="5" fill="#2DE3A0"/><text class="s" x="114" y="730">Code computes every number</text>
+  <circle cx="420" cy="725" r="5" fill="#2DE3A0"/><text class="s" x="434" y="730">Every claim cites its evidence</text>
+  <circle cx="752" cy="725" r="5" fill="#2DE3A0"/><text class="s" x="766" y="730">Nothing airs unchecked, in any language</text>
+  <circle cx="1140" cy="725" r="5" fill="#2DE3A0"/><text class="s" x="1154" y="730">Every stage scored against the hidden truth</text>
+</g>
+
+<!-- Runs on Azure -->
+<rect x="64" y="784" width="1552" height="96" rx="18" fill="#FFFFFF" stroke="#E3E7EC"/>
+<text class="k" x="92" y="818">RUNS ON MICROSOFT AZURE</text>
+<g class="f">
+  <text class="m" x="92" y="852">Microsoft Foundry  ·  Agent Framework  ·  Event Hubs  ·  Container Apps + Jobs  ·  Azure SQL  ·  Azure AI Speech  ·  Translator  ·  Static Web Apps  ·  Application Insights</text>
+</g>
+<text class="f" x="64" y="918" style="font:400 12px 'Segoe UI',Inter,sans-serif" fill="#8A94A3">Detailed component view: azure-architecture.svg. All clubs, players and matches are fictional.</text>
+</svg>

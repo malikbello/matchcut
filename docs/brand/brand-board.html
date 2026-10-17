@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Matchcut brand board v1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@600;800;900&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=IBM+Plex+Sans+Arabic:wght@500;600&display=swap" rel="stylesheet">
+<style>
+:root{--ink950:#07090D;--ink900:#0C1016;--ink800:#141A22;--ink700:#212A35;--chalk:#F4F6F9;--mist:#9AA6B5;--signal:#FF4A2E;--verified:#2DE3A0;--flood:#FFB547;--data:#6CC8FF;--turf9:#0B2E23;--turf6:#1B6A4C}
+*{box-sizing:border-box;margin:0;padding:0}
+body{width:1920px;height:1200px;background:var(--ink950);color:var(--chalk);font-family:Inter,system-ui,sans-serif;overflow:hidden;font-feature-settings:"tnum" 1}
+.grid{display:grid;grid-template-columns:760px 1fr;height:100%}
+.hero{position:relative;padding:72px 72px 56px;background:
+ radial-gradient(900px 520px at 30% -10%,rgba(255,255,255,.10),transparent 60%),
+ radial-gradient(600px 400px at 85% 110%,rgba(27,106,76,.35),transparent 70%),
+ linear-gradient(180deg,#0B0F15,#07090D);border-right:1px solid var(--ink700);display:flex;flex-direction:column}
+.kicker{font:600 13px/1 Inter;letter-spacing:.22em;color:var(--mist);text-transform:uppercase}
+.wordmark{margin-top:120px}
+.tag{font:800 64px/1 'Big Shoulders Display';letter-spacing:.01em;margin-top:28px;text-transform:uppercase}
+.tag em{font-style:normal;color:var(--signal)}
+.lede{margin-top:22px;font:400 19px/1.55 Inter;color:var(--mist);max-width:540px}
+.marks{margin-top:auto;display:flex;gap:28px;align-items:center}
+.markbox{width:96px;height:96px;border-radius:22px;background:var(--ink800);border:1px solid var(--ink700);display:grid;place-items:center}
+.markbox.light{background:var(--chalk)}
+.meta{font:500 12px/1.6 'JetBrains Mono';color:var(--mist)}
+.right{padding:56px 64px;display:grid;grid-template-rows:auto auto 1fr;gap:40px}
+h3{font:600 12.5px/1 Inter;letter-spacing:.2em;text-transform:uppercase;color:var(--mist);margin-bottom:18px}
+.pal{display:grid;grid-template-columns:repeat(8,1fr);gap:12px}
+.sw{border-radius:14px;overflow:hidden;border:1px solid var(--ink700);background:var(--ink900)}
+.sw .c{height:86px}
+.sw .t{padding:10px 12px}
+.sw b{display:block;font:600 13px Inter}
+.sw span{display:block;font:500 11px 'JetBrains Mono';color:var(--mist);margin-top:3px}
+.sw i{display:block;font:400 11px/1.35 Inter;color:var(--mist);font-style:normal;margin-top:6px}
+.type{display:grid;grid-template-columns:1.45fr 1fr 1fr;gap:24px}
+.tcard{background:var(--ink900);border:1px solid var(--ink700);border-radius:16px;padding:22px 24px}
+.tcard .big{white-space:nowrap;font:900 50px/0.95 'Big Shoulders Display';letter-spacing:.005em;text-transform:uppercase}
+.tcard .ui{white-space:nowrap;font:600 27px/1.15 Inter;letter-spacing:-.01em}
+.tcard .mono{white-space:nowrap;font:600 24px/1.15 'JetBrains Mono'}
+.tcard small{display:block;margin-top:12px;font:500 12px/1.5 Inter;color:var(--mist)}
+.comps{display:grid;grid-template-columns:1.05fr 1.05fr .62fr;gap:24px;min-height:0}
+.panel{background:var(--ink900);border:1px solid var(--ink700);border-radius:18px;padding:22px;position:relative;overflow:hidden}
+/* score bug */
+.bug{display:flex;align-items:stretch;height:52px;border-radius:10px;overflow:hidden;background:rgba(12,16,22,.92);border:1px solid #2a3442;width:max-content;box-shadow:0 14px 40px rgba(0,0,0,.45)}
+.bug .live{background:var(--signal);display:flex;align-items:center;gap:7px;padding:0 10px;font:700 12px Inter;letter-spacing:.12em}
+.bug .live:before{content:"";width:7px;height:7px;border-radius:50%;background:#fff}
+.bug .tm{display:flex;align-items:center;gap:8px;padding:0 10px;font:800 21px 'Big Shoulders Display';letter-spacing:.04em}
+.kit{width:6px;height:28px;border-radius:2px}
+.bug .sc{display:flex;align-items:center;padding:0 12px;font:900 26px 'Big Shoulders Display';background:#151c26}
+.bug .clk{display:flex;align-items:center;padding:0 12px;font:600 14px 'JetBrains Mono';color:var(--mist);border-left:1px solid #2a3442}
+.pitch{margin-top:18px;height:250px;border-radius:12px;position:relative;overflow:hidden;background:
+ repeating-linear-gradient(90deg,#123d2e 0 60px,#0f3627 60px 120px)}
+.pitch:after{content:"";position:absolute;inset:0;background:radial-gradient(500px 220px at 50% 0%,rgba(255,255,255,.14),transparent 70%)}
+.pitch svg{position:absolute;inset:0}
+.lt{position:absolute;left:18px;bottom:18px;display:flex;align-items:stretch;border-radius:10px;overflow:hidden;box-shadow:0 10px 30px rgba(0,0,0,.5);z-index:2}
+.lt .n{background:var(--chalk);color:var(--ink950);padding:9px 14px;font:800 22px/1 'Big Shoulders Display';text-transform:uppercase;display:flex;flex-direction:column;justify-content:center}
+.lt .n small{font:600 10.5px Inter;letter-spacing:.14em;color:#4b5563;margin-top:3px}
+.lt .v{background:rgba(12,16,22,.94);padding:9px 14px;display:flex;flex-direction:column;justify-content:center}
+.lt .v b{font:900 26px/1 'Big Shoulders Display'}
+.lt .v span{font:500 11px Inter;color:var(--mist);margin-top:3px}
+/* insight card */
+.ins{background:var(--ink800);border:1px solid var(--ink700);border-radius:14px;padding:18px 18px 16px}
+.ins .row{display:flex;justify-content:space-between;align-items:center}
+.chip{font:600 11px Inter;letter-spacing:.12em;text-transform:uppercase;color:var(--mist)}
+.ver{display:inline-flex;align-items:center;gap:6px;font:600 11.5px Inter;color:var(--verified)}
+.ver:before{content:"";width:14px;height:14px;border-radius:50%;background:var(--verified);-webkit-mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M6.5 11.2 3.3 8l1.1-1.1 2.1 2.1 5-5L12.6 5z" fill="black"/><circle cx="8" cy="8" r="8" fill="none"/></svg>') center/14px no-repeat,linear-gradient(#000,#000)}
+.ins h4{margin-top:12px;font:800 30px/1.02 'Big Shoulders Display';text-transform:uppercase}
+.ins p{margin-top:10px;font:400 14.5px/1.55 Inter;color:#C9D2DD}
+.ins .ev{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.ins .ev span{font:500 11px 'JetBrains Mono';color:var(--mist);background:var(--ink900);border:1px solid var(--ink700);padding:4px 8px;border-radius:6px}
+.hist{margin-top:14px;border-radius:14px;padding:16px 18px;background:linear-gradient(120deg,rgba(255,74,46,.16),rgba(255,74,46,0) 60%),var(--ink800);border:1px solid #3a2a26}
+.hist .k{font:600 11px Inter;letter-spacing:.14em;color:var(--signal)}
+.hist .h{margin-top:8px;font:900 40px/0.95 'Big Shoulders Display';text-transform:uppercase}
+.hist .s{margin-top:6px;font:400 13px Inter;color:var(--mist)}
+.mom{margin-top:14px}
+/* phone */
+.phone{border-radius:34px;border:1px solid #2b3542;background:#000;height:100%;padding:10px;display:flex}
+.screen{border-radius:26px;flex:1;position:relative;overflow:hidden;background:
+ radial-gradient(260px 200px at 50% 18%,rgba(255,255,255,.18),transparent 70%),
+ linear-gradient(180deg,#14402F 0%,#0B2E23 48%,#07090D 78%)}
+.screen .top{position:absolute;top:18px;left:16px;right:16px;display:flex;justify-content:space-between;font:600 10.5px Inter;letter-spacing:.14em;color:#E9EEF4}
+.screen .fig{position:absolute;left:50%;top:84px;transform:translateX(-50%)}
+.screen .cap{position:absolute;left:16px;right:16px;bottom:20px}
+.screen .cap .k{font:600 10.5px Inter;letter-spacing:.16em;color:var(--signal)}
+.screen .cap h5{margin-top:6px;font:900 31px/0.95 'Big Shoulders Display';text-transform:uppercase}
+.screen .cap p{margin-top:8px;font:500 11.5px/1.45 Inter;color:#D5DCE4}
+.screen .cap .bar{margin-top:12px;height:3px;background:#2a3442;border-radius:2px;overflow:hidden}
+.screen .cap .bar i{display:block;height:100%;width:62%;background:var(--chalk)}
+.foot{position:absolute;left:72px;bottom:28px;font:500 11.5px Inter;color:#5f6b7a}
+</style>
+</head>
+<body>
+<div class="grid">
+  <section class="hero">
+    <div class="kicker">Brand board · v1 · 17 Oct 2026</div>
+    <div class="wordmark">
+      <svg width="600" height="110" viewBox="0 0 600 110" aria-label="Matchcut">
+        <defs>
+          <clipPath id="cutOut"><polygon points="0,0 360,0 334,110 0,110"/><polygon points="372,0 600,0 600,110 346,110"/></clipPath>
+          <clipPath id="sliver"><polygon points="360,0 372,0 346,110 334,110"/></clipPath>
+        </defs>
+        <text x="0" y="96" clip-path="url(#cutOut)" style="font:900 124px 'Big Shoulders Display';letter-spacing:2px" fill="#F4F6F9">MATCHCUT</text>
+        <g clip-path="url(#sliver)"><text x="6" y="92" style="font:900 124px 'Big Shoulders Display';letter-spacing:2px" fill="#FF4A2E">MATCHCUT</text></g>
+      </svg>
+    </div>
+    <div class="tag">Every fan's <em>cut.</em></div>
+    <p class="lede" id="lede">Live, verified match intelligence and a personalised highlights film for every fan: their club, their player, their language, minutes after the final whistle.</p>
+    <div style="margin-top:44px;display:flex;flex-wrap:wrap;gap:10px">
+      <span style="font:600 12px Inter;letter-spacing:.14em;text-transform:uppercase;padding:9px 14px;border:1px solid #212A35;border-radius:999px;color:#F4F6F9">Precise</span>
+      <span style="font:600 12px Inter;letter-spacing:.14em;text-transform:uppercase;padding:9px 14px;border:1px solid #212A35;border-radius:999px;color:#F4F6F9">Cinematic</span>
+      <span style="font:600 12px Inter;letter-spacing:.14em;text-transform:uppercase;padding:9px 14px;border:1px solid #212A35;border-radius:999px;color:#F4F6F9">Warm</span>
+      <span style="font:600 12px Inter;letter-spacing:.14em;text-transform:uppercase;padding:9px 14px;border:1px solid #212A35;border-radius:999px;color:#F4F6F9">Global</span>
+      <span style="font:600 12px Inter;letter-spacing:.14em;text-transform:uppercase;padding:9px 14px;border:1px solid #2DE3A0;border-radius:999px;color:#2DE3A0">Trustworthy</span>
+    </div>
+    <ul style="margin-top:34px;list-style:none;display:grid;gap:12px;font:400 15px/1.5 Inter;color:#C9D2DD">
+      <li><b style="color:#F4F6F9">Readable in 2 seconds.</b> One hero number per card.</li>
+      <li><b style="color:#F4F6F9">Evidence one tap away.</b> Mint means checked, never decoration.</li>
+      <li><b style="color:#F4F6F9">Graphics cut in.</b> 160 ms wipe, no bounce, spoiler-safe.</li>
+    </ul>
+    <div class="marks">
+      <div class="markbox">
+        <svg width="58" height="58" viewBox="0 0 58 58"><rect x="4" y="8" width="50" height="42" rx="11" fill="none" stroke="#F4F6F9" stroke-width="5"/><line x1="20" y1="52" x2="34" y2="6" stroke="#07090D" stroke-width="9"/><line x1="21" y1="49" x2="33" y2="9" stroke="#FF4A2E" stroke-width="4.5" stroke-linecap="round"/><circle cx="40.5" cy="29" r="5.2" fill="#F4F6F9"/></svg>
+      </div>
+      <div class="markbox light">
+        <svg width="58" height="58" viewBox="0 0 58 58"><rect x="4" y="8" width="50" height="42" rx="11" fill="none" stroke="#07090D" stroke-width="5"/><line x1="20" y1="52" x2="34" y2="6" stroke="#F4F6F9" stroke-width="9"/><line x1="21" y1="49" x2="33" y2="9" stroke="#FF4A2E" stroke-width="4.5" stroke-linecap="round"/><circle cx="40.5" cy="29" r="5.2" fill="#07090D"/></svg>
+      </div>
+      <div class="meta">THE CUT MARK<br>14° cut · ball exits the frame<br>min size 16 px</div>
+    </div>
+  </section>
+
+  <section class="right">
+    <div>
+      <h3>Colour · floodlit night</h3>
+      <div class="pal">
+        <div class="sw"><div class="c" style="background:#07090D"></div><div class="t"><b>Ink 950</b><span>#07090D</span><i>Canvas</i></div></div>
+        <div class="sw"><div class="c" style="background:#141A22"></div><div class="t"><b>Ink 800</b><span>#141A22</span><i>Surfaces</i></div></div>
+        <div class="sw"><div class="c" style="background:#F4F6F9"></div><div class="t"><b>Chalk</b><span>#F4F6F9</span><i>Primary text</i></div></div>
+        <div class="sw"><div class="c" style="background:#9AA6B5"></div><div class="t"><b>Mist</b><span>#9AA6B5</span><i>Secondary text</i></div></div>
+        <div class="sw"><div class="c" style="background:#FF4A2E"></div><div class="t"><b>Signal</b><span>#FF4A2E</span><i>Live · the cut · actions</i></div></div>
+        <div class="sw"><div class="c" style="background:#2DE3A0"></div><div class="t"><b>Verified</b><span>#2DE3A0</span><i>Only for "checked"</i></div></div>
+        <div class="sw"><div class="c" style="background:#FFB547"></div><div class="t"><b>Floodlight</b><span>#FFB547</span><i>Pending · checking</i></div></div>
+        <div class="sw"><div class="c" style="background:linear-gradient(90deg,#6CC8FF 0 50%,#1B6A4C 50%)"></div><div class="t"><b>Data · Turf</b><span>#6CC8FF · #1B6A4C</span><i>Charts · pitch only</i></div></div>
+      </div>
+    </div>
+
+    <div>
+      <h3>Type · all open-licence</h3>
+      <div class="type">
+        <div class="tcard"><div class="big">Kestrel 2–1 Ironvale</div><small>Big Shoulders Display · scores, headlines, big numbers</small></div>
+        <div class="tcard"><div class="ui">Why the press worked</div><small>Inter · interface and body · tabular figures</small></div>
+        <div class="tcard"><div class="mono">67:42 · EV-2481</div><small>JetBrains Mono · clock, timecode, evidence</small></div>
+      </div>
+    </div>
+
+    <div class="comps">
+      <div class="panel">
+        <h3>Broadcast graphics</h3>
+        <div class="bug">
+          <div class="live">LIVE</div>
+          <div class="tm"><i class="kit" style="background:#E8B422"></i>KES</div>
+          <div class="sc">2 – 1</div>
+          <div class="tm">IRV<i class="kit" style="background:#3A7BEA"></i></div>
+          <div class="clk">67:42</div>
+        </div>
+        <div class="pitch">
+          <svg viewBox="0 0 560 250" width="100%" height="100%" preserveAspectRatio="none">
+            <g stroke="rgba(255,255,255,.55)" stroke-width="2" fill="none"><rect x="10" y="10" width="540" height="230"/><line x1="280" y1="10" x2="280" y2="240"/><circle cx="280" cy="125" r="34"/><rect x="10" y="70" width="70" height="110"/><rect x="480" y="70" width="70" height="110"/></g>
+            <path d="M120 170 Q230 60 395 108" stroke="#F4F6F9" stroke-width="2.5" fill="none" stroke-dasharray="6 6"/>
+            <circle cx="120" cy="170" r="9" fill="#E8B422" stroke="#07090D" stroke-width="2"/><circle cx="395" cy="108" r="9" fill="#E8B422" stroke="#07090D" stroke-width="2"/>
+            <circle cx="330" cy="140" r="9" fill="#3A7BEA" stroke="#07090D" stroke-width="2"/><circle cx="420" cy="150" r="9" fill="#3A7BEA" stroke="#07090D" stroke-width="2"/>
+            <circle cx="398" cy="104" r="4" fill="#fff"/>
+          </svg>
+          <div class="lt"><div class="n">Okafor<small>KES · #9</small></div><div class="v"><b>35.4 km/h</b><span>fastest sprint this season</span></div></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h3>Insight + history cards</h3>
+        <div class="ins">
+          <div class="row"><span class="chip">67' · Why it matters</span><span class="ver">Verified</span></div>
+          <h4>The press broke Ironvale's build-up</h4>
+          <p>Kestrel won the ball back 4 times in Ironvale's half in five minutes. The goal came 9 seconds after the last one.</p>
+          <div class="ev"><span>EV-2431</span><span>EV-2455</span><span>EV-2470</span><span>EV-2481</span></div>
+        </div>
+        <div class="hist">
+          <div class="k">MILESTONE · LEAGUE MEMORY</div>
+          <div class="h">First away goal in 14 matches</div>
+          <div class="s">Checked against 2 seasons · 760 matches</div>
+        </div>
+      </div>
+
+      <div class="phone"><div class="screen">
+        <div class="top"><span>YOUR CUT</span><span>0:52</span></div>
+        <svg class="fig" width="120" height="200" viewBox="0 0 120 200">
+          <ellipse cx="60" cy="190" rx="38" ry="7" fill="rgba(0,0,0,.45)"/>
+          <path d="M44 62 Q60 50 76 62 L84 120 Q60 130 36 120 Z" fill="#E8B422"/>
+          <text x="60" y="104" text-anchor="middle" style="font:900 30px 'Big Shoulders Display'" fill="#07090D">9</text>
+          <circle cx="60" cy="38" r="15" fill="#2a2f36"/>
+          <path d="M38 122 L46 186 L56 186 L58 128 L62 128 L64 186 L74 186 L82 122 Z" fill="#11161d"/>
+          <path d="M45 58 Q60 46 75 58" stroke="rgba(255,255,255,.7)" stroke-width="2" fill="none"/>
+        </svg>
+        <div class="cap"><div class="k">TUNDE'S CUT · PIDGIN</div><h5>Okafor<br>no dey miss!</h5><p>Kestrel 2–1 Ironvale · 67' · first away goal in 14</p><div class="bar"><i></i></div></div>
+      </div></div>
+    </div>
+  </section>
+</div>
+<div class="foot">All clubs, players and matches shown are fictional. Fonts: Big Shoulders Display, Inter, JetBrains Mono (SIL OFL).</div>
+</body>
+</html>
