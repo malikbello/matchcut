@@ -1,0 +1,122 @@
+{
+  "$defs": {
+    "BallPosition": {
+      "additionalProperties": false,
+      "properties": {
+        "x": {
+          "maximum": 110,
+          "minimum": -5,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 73,
+          "minimum": -5,
+          "title": "Y",
+          "type": "number"
+        },
+        "z": {
+          "maximum": 40,
+          "minimum": 0,
+          "title": "Z",
+          "type": "number"
+        }
+      },
+      "required": [
+        "x",
+        "y",
+        "z"
+      ],
+      "title": "BallPosition",
+      "type": "object"
+    },
+    "PlayerPosition": {
+      "additionalProperties": false,
+      "properties": {
+        "player_id": {
+          "title": "Player Id",
+          "type": "string"
+        },
+        "speed_mps": {
+          "maximum": 12.5,
+          "minimum": 0,
+          "title": "Speed Mps",
+          "type": "number"
+        },
+        "team_id": {
+          "title": "Team Id",
+          "type": "string"
+        },
+        "x": {
+          "maximum": 110,
+          "minimum": -5,
+          "title": "X",
+          "type": "number"
+        },
+        "y": {
+          "maximum": 73,
+          "minimum": -5,
+          "title": "Y",
+          "type": "number"
+        }
+      },
+      "required": [
+        "player_id",
+        "team_id",
+        "x",
+        "y",
+        "speed_mps"
+      ],
+      "title": "PlayerPosition",
+      "type": "object"
+    }
+  },
+  "$id": "https://matchcut.dev/schemas/1.0.0/tracking-frame.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "ball": {
+      "$ref": "#/$defs/BallPosition"
+    },
+    "match_id": {
+      "title": "Match Id",
+      "type": "string"
+    },
+    "period": {
+      "enum": [
+        1,
+        2
+      ],
+      "title": "Period",
+      "type": "integer"
+    },
+    "players": {
+      "items": {
+        "$ref": "#/$defs/PlayerPosition"
+      },
+      "maxItems": 22,
+      "minItems": 14,
+      "title": "Players",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.0.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "t_ms": {
+      "minimum": 0,
+      "title": "T Ms",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "match_id",
+    "t_ms",
+    "period",
+    "ball",
+    "players"
+  ],
+  "title": "TrackingFrame",
+  "type": "object"
+}

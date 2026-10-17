@@ -38,3 +38,6 @@ hls/
 Thumbs.db
 .vscode/*
 !.vscode/extensions.json
+
+# Generated data (rebuild with: uv run matchcut-sim league / match)
+data/

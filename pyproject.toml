@@ -1,0 +1,66 @@
+[project]
+name = "matchcut"
+version = "0.1.0"
+description = "Every fan's cut: verified live match intelligence and personalised highlight films from synthetic football events."
+requires-python = ">=3.12"
+readme = "README.md"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*", "services/*"]
+
+[tool.uv.sources]
+matchcut-contracts = { workspace = true }
+matchcut-sim = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "matchcut-contracts",
+  "matchcut-sim",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "hypothesis>=6.120",
+  "ruff>=0.8",
+  "pyright>=1.1.390",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "RUF", "N", "C4", "PT", "PL", "S"]
+ignore = [
+  "PLR0913", "PLR0917",  # physics and event helpers take many explicit arguments
+  "PLR2004",             # magic numbers are named football constants in context
+  "S311",                # non-crypto RNG is deliberate: seeded, reproducible simulation
+  "S101",                # asserts document engine invariants (type narrowing)
+  "RUF001",              # en dashes in user-facing report text are intentional
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/**" = ["S101", "PLR2004"]
+"services/sim/src/matchcut_sim/engine.py" = ["PLR0912", "PLR0915"]  # decision logic reads best as one function
+"services/sim/src/matchcut_sim/league.py" = ["E501"]                # club data table, one club per line
+"docs/**" = ["E501", "E741"]                                          # diagram generator: drawing coordinates
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+include = ["packages", "services"]
+exclude = ["**/.venv", "**/__pycache__"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages", "services"]
+addopts = "-q --strict-markers"
+
+[tool.coverage.run]
+source = ["matchcut_contracts", "matchcut_sim"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
