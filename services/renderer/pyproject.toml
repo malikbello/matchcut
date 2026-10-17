@@ -1,0 +1,16 @@
+[project]
+name = "matchcut-renderer"
+version = "0.1.0"
+description = "The TV camera: renders broadcast-style video of a synthetic match from 10 Hz tracking."
+requires-python = ">=3.12"
+dependencies = ["matchcut-contracts", "matchcut-sim", "numpy>=2.1", "skia-python>=87.6"]
+
+[project.scripts]
+matchcut-render = "matchcut_renderer.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/matchcut_renderer"]

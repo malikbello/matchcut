@@ -8,18 +8,19 @@ matchcut-sim realism  --matches 12 --out reports/realism.md
 from __future__ import annotations
 
 import argparse
+import io
 import json
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
+from matchcut_analytics import MatchState, MomentDetector, XTModel, score_tactical_detection, train
 
 from matchcut_sim.engine import MatchResult, simulate_match
-from matchcut_sim.history import simulate_history
 from matchcut_sim.league import build_league
 from matchcut_sim.realism import in_range, match_stats, report_markdown, summarise
-
-PAST_SEASONS = ["2024-25", "2025-26"]
+from matchcut_sim.universe import build_universe
 
 
 def write_match(m: MatchResult, out: Path) -> Path:
@@ -47,24 +48,36 @@ def write_match(m: MatchResult, out: Path) -> Path:
 
 
 def cmd_league(args: argparse.Namespace) -> None:
-    league = build_league(args.seed)
-    hist = simulate_history(league, PAST_SEASONS, seed=args.seed + 1)
+    u = build_universe(args.seed)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / "clubs.json").write_text(
-        json.dumps([c.model_dump() for c in league.clubs], indent=2), encoding="utf-8"
-    )
-    (out / "players.json").write_text(
-        json.dumps([p.model_dump() for p in league.players], indent=2), encoding="utf-8"
-    )
-    (out / "history_matches.json").write_text(
-        json.dumps([m.__dict__ for m in hist.matches]), encoding="utf-8"
-    )
-    (out / "history_player_lines.json").write_text(
-        json.dumps([ln.__dict__ for ln in hist.lines]), encoding="utf-8"
+
+    def dump(name: str, rows: list) -> None:
+        (out / name).write_text(json.dumps(rows, indent=1), encoding="utf-8")
+
+    dump("clubs.json", [c.model_dump() for c in u.league.clubs])
+    dump("players.json", [p.model_dump() for p in u.all_players.values()])
+    dump("history_matches.json", [m.__dict__ for m in u.history.matches])
+    dump("history_player_lines.json", [ln.__dict__ for ln in u.history.lines])
+    dump("transfers.json", [t.__dict__ for t in u.transfers])
+    dump("careers.json", [c.__dict__ for c in u.careers])
+    dump(
+        "seasons.json",
+        [
+            {
+                "season": s,
+                "top_flight": u.top_flight[s],
+                "promoted": u.promoted.get(s, []),
+                "relegated": u.relegated.get(s, []),
+            }
+            for s in u.top_flight
+        ],
     )
     print(
-        f"{len(league.clubs)} clubs, {len(league.players)} players, {len(hist.matches)} past matches -> {out}"
+        f"{u.league.season}: {len(u.league.clubs)} clubs, {len(u.league.players)} players | history: "
+        f"{len(u.history.seasons)} seasons, {len(u.history.matches)} matches, "
+        f"{len(u.transfers) // 2} transfers, "
+        f"{sum(c.kind == 'retired' for c in u.careers)} retirements -> {out}"
     )
 
 
@@ -99,6 +112,105 @@ def cmd_realism(args: argparse.Namespace) -> None:
     print(f"{sum(ok.values())}/{len(ok)} metrics in range")
 
 
+def replay_analytics(m: MatchResult):
+    """Feed a simulated match through the live analytics in timeline order, as the cloud lane will."""
+    det = MomentDetector(MatchState(m.meta, XTModel.load_default()))
+    events = iter(m.events)
+    nxt = next(events, None)
+    for i, t in enumerate(m.t_ms):
+        while nxt is not None and nxt.t_ms <= t:
+            det.on_event(nxt)
+            nxt = next(events, None)
+        ids = [m.player_ids[r] if r >= 0 else None for r in m.roster[i]]
+        period = int(m.period[i])
+        home_right = period == 1
+        att = {m.meta.home_club_id: home_right, m.meta.away_club_id: not home_right}
+        clock = f"{int(t // 60000)}:{int(t // 1000) % 60:02d}"
+        det.on_tracking(
+            int(t),
+            clock,
+            ids,
+            m.team_of_slot,
+            m.pos[i, :, 0].tolist(),
+            m.speed[i].tolist(),
+            att,
+            ball_x=float(m.ball[i, 0]),
+        )
+    while nxt is not None:
+        det.on_event(nxt)
+        nxt = next(events, None)
+    return det
+
+
+def cmd_train_xt(args: argparse.Namespace) -> None:
+    league = build_league(args.league_seed)
+    ids = [c.club_id for c in league.clubs]
+    events = []
+    for i in range(args.matches):
+        m = simulate_match(
+            league, ids[i % 20], ids[(i * 7 + 3) % 20], seed=5000 + i, half_minutes=args.half_minutes
+        )
+        events.extend(m.events)
+    model = train(events)
+    out = Path(args.out)
+    out.write_text(model.to_json(), encoding="utf-8")
+    print(f"xT trained on {model.trained_on_events} actions from {args.matches} matches -> {out}")
+
+
+def cmd_analyse(args: argparse.Namespace) -> None:
+    league = build_league(args.league_seed)
+    m = simulate_match(league, args.home, args.away, args.seed, half_minutes=args.half_minutes)
+    det = replay_analytics(m)
+    for mo in det.moments:
+        if mo.importance >= args.min_importance:
+            print(
+                f"{mo.clock:>8}  {mo.kind.value:<15} {mo.team_id or '':<4} {mo.player_id or '':<7} "
+                f"{mo.importance:.2f}  {mo.metrics}"
+            )
+    print("snapshot:", det.state.snapshot())
+    print("tactical detection vs truth:", score_tactical_detection(det.moments, m.truth))
+
+
+def cmd_eval_tactics(args: argparse.Namespace) -> None:
+    league = build_league(args.league_seed)
+    ids = [c.club_id for c in league.clubs]
+    tp = fp = found = changes = 0
+    rows = []
+    for i in range(args.matches):
+        m = simulate_match(league, ids[(3 * i) % 20], ids[(3 * i + 5) % 20], seed=300 + i)
+        det = replay_analytics(m)
+        sc = score_tactical_detection(det.moments, m.truth)
+        n_det = int(sc["detections"])
+        tp_i = round(sc["precision"] * n_det) if n_det else 0
+        tp, fp = tp + tp_i, fp + n_det - tp_i
+        changes += int(sc["changes"])
+        found += round(sc["recall"] * sc["changes"])
+        rows.append(f"| {m.meta.match_id} | {int(sc['changes'])} | {n_det} | {tp_i} |")
+        print(rows[-1], flush=True)
+    precision = tp / max(tp + fp, 1)
+    recall = found / max(changes, 1)
+    md = "\n".join(
+        [
+            "# Tactical-shift detection vs hidden truth",
+            "",
+            f"{args.matches} full matches; each contains one hidden tactical change "
+            "(a switch to a high press).",
+            "A detection counts if it names the right team within 7 minutes after the change.",
+            "",
+            f"**Precision {precision:.0%} · Recall {recall:.0%}**",
+            "",
+            "| Match | True changes | Detections | Correct |",
+            "|---|---|---|---|",
+            *rows,
+            "",
+        ]
+    )
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(md, encoding="utf-8")
+    print(f"precision {precision:.2f} recall {recall:.2f} -> {out}")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="matchcut-sim")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -119,7 +231,28 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--league-seed", type=int, default=2026)
     c.add_argument("--out", default="reports/realism.md")
     c.set_defaults(fn=cmd_realism)
+    d = sub.add_parser("train-xt", help="train the expected-threat grid from simulated matches")
+    d.add_argument("--matches", type=int, default=40)
+    d.add_argument("--half-minutes", type=float, default=15.0)
+    d.add_argument("--league-seed", type=int, default=2026)
+    d.add_argument("--out", default="packages/analytics/src/matchcut_analytics/xt_grid.json")
+    d.set_defaults(fn=cmd_train_xt)
+    e = sub.add_parser("analyse", help="replay a match through live analytics and list moments")
+    e.add_argument("--home", default="kes")
+    e.add_argument("--away", default="irv")
+    e.add_argument("--seed", type=int, default=7)
+    e.add_argument("--half-minutes", type=float, default=45.0)
+    e.add_argument("--min-importance", type=float, default=0.3)
+    e.add_argument("--league-seed", type=int, default=2026)
+    e.set_defaults(fn=cmd_analyse)
+    g = sub.add_parser("eval-tactics", help="score tactical-shift detection against hidden truth")
+    g.add_argument("--matches", type=int, default=8)
+    g.add_argument("--league-seed", type=int, default=2026)
+    g.add_argument("--out", default="reports/tactical-detection.md")
+    g.set_defaults(fn=cmd_eval_tactics)
     args = p.parse_args(argv)
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to cp1252
     args.fn(args)
 
 

@@ -15,6 +15,7 @@ from matchcut_contracts.models import (
     Club,
     MatchEvent,
     MatchMeta,
+    Moment,
     Player,
     TrackingFrame,
     TruthRecord,
@@ -27,6 +28,7 @@ MODELS = {
     "match-event": MatchEvent,
     "tracking-frame": TrackingFrame,
     "truth-record": TruthRecord,
+    "moment": Moment,
 }
 
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / "schemas"
