@@ -20,7 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SCHEMA_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
 PITCH_LENGTH_M = 105.0
 PITCH_WIDTH_M = 68.0
 
@@ -80,8 +80,10 @@ class Club(_Contract):
 
 
 class Player(_Contract):
-    player_id: str = Field(pattern=r"^[a-z]{3}-\d{2}$", description="<club_id>-<shirt number>")
-    club_id: str
+    player_id: str = Field(
+        pattern=r"^p\d{5}$", description="Permanent ID that survives transfers, e.g. p00042"
+    )
+    club_id: str = Field(description="Current club, or 'retired'")
     name: str
     known_as: str = Field(description="Name used on screen, usually the surname")
     shirt_number: int = Field(ge=1, le=99)
@@ -224,3 +226,38 @@ class TruthRecord(_Contract):
     team_id: str | None = None
     player_id: str | None = None
     detail: dict[str, float | int | str | bool]
+
+
+# ---------------------------------------------------------------- analytics
+
+
+class MomentKind(StrEnum):
+    GOAL = "goal"
+    BIG_CHANCE = "big_chance"
+    GREAT_SAVE = "great_save"
+    MOMENTUM_SWING = "momentum_swing"
+    PRESS_SURGE = "press_surge"
+    TACTICAL_SHIFT = "tactical_shift"
+    SPEED_PEAK = "speed_peak"
+    CARD = "card"
+    SUBSTITUTION = "substitution"
+
+
+class Moment(_Contract):
+    """Something worth showing on screen, found by code (never by a model)."""
+
+    schema_version: str = SCHEMA_VERSION
+    match_id: str
+    moment_id: str = Field(pattern=r"^MO-\d{5}$")
+    t_ms: int = Field(ge=0)
+    clock: str
+    kind: MomentKind
+    team_id: str | None = None
+    player_id: str | None = None
+    importance: float = Field(
+        ge=0, le=1, description="Editorial weight used to rank moments for overlays and recaps"
+    )
+    evidence_event_ids: list[str] = Field(default_factory=list, description="Events that prove the moment")
+    metrics: dict[str, float | int | str] = Field(
+        default_factory=dict, description="Code-computed numbers agents may cite, at the precision given"
+    )

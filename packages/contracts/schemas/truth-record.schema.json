@@ -1,5 +1,5 @@
 {
-  "$id": "https://matchcut.dev/schemas/1.0.0/truth-record.schema.json",
+  "$id": "https://matchcut.dev/schemas/1.1.0/truth-record.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "What really happened tactically. Hidden from every downstream service; used only to score them.",
@@ -51,7 +51,7 @@
       "title": "Player Id"
     },
     "schema_version": {
-      "default": "1.0.0",
+      "default": "1.1.0",
       "title": "Schema Version",
       "type": "string"
     },

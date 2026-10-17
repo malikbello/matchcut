@@ -9,16 +9,22 @@ readme = "README.md"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/contracts", "services/sim"]
+members = ["packages/contracts", "packages/analytics", "services/sim", "services/league-memory", "services/renderer"]
 
 [tool.uv.sources]
 matchcut-contracts = { workspace = true }
+matchcut-analytics = { workspace = true }
 matchcut-sim = { workspace = true }
+matchcut-memory = { workspace = true }
+matchcut-renderer = { workspace = true }
 
 [dependency-groups]
 dev = [
   "matchcut-contracts",
+  "matchcut-analytics",
   "matchcut-sim",
+  "matchcut-memory",
+  "matchcut-renderer",
   "pytest>=8.3",
   "pytest-cov>=6.0",
   "hypothesis>=6.120",
@@ -44,6 +50,8 @@ ignore = [
 "**/tests/**" = ["S101", "PLR2004"]
 "services/sim/src/matchcut_sim/engine.py" = ["PLR0912", "PLR0915"]  # decision logic reads best as one function
 "services/sim/src/matchcut_sim/league.py" = ["E501"]                # club data table, one club per line
+"packages/analytics/src/matchcut_analytics/state.py" = ["PLR0912", "PLR0915"]    # one branch per event type
+"packages/analytics/src/matchcut_analytics/moments.py" = ["PLR0912"]               # one branch per event type
 "docs/**" = ["E501", "E741"]                                          # diagram generator: drawing coordinates
 
 [tool.pyright]
@@ -57,7 +65,7 @@ testpaths = ["packages", "services"]
 addopts = "-q --strict-markers"
 
 [tool.coverage.run]
-source = ["matchcut_contracts", "matchcut_sim"]
+source = ["matchcut_contracts", "matchcut_analytics", "matchcut_sim", "matchcut_memory", "matchcut_renderer"]
 branch = true
 
 [tool.coverage.report]

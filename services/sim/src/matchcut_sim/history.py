@@ -1,9 +1,11 @@
 """Past seasons for League Memory: results and per-player match lines.
 
-A fast team-strength model (Poisson goals with home advantage) rather than the
-full engine, so two seasons (760 matches) generate in about a second. Players
-are credited from the same squads the live engine uses, which keeps careers,
-streaks and records consistent with what fans see live.
+Scorelines use the Dixon-Coles model (Dixon & Coles, 1997): Poisson goals
+with home advantage plus a low-score dependence correction (tau) that fixes
+how often 0-0, 1-0, 0-1 and 1-1 occur. A season of 380 matches generates in a
+fraction of a second, so five seasons of history are cheap. Players are
+credited from that season's actual squads, keeping careers consistent across
+transfers.
 """
 
 from __future__ import annotations
@@ -12,12 +14,13 @@ import math
 import random
 from dataclasses import dataclass, field
 
-from matchcut_contracts import Position
+from matchcut_contracts import Player, Position
 
-from matchcut_sim.league import League
-
-HOME_ADVANTAGE = 0.22
-BASE_GOALS = 1.32
+HOME_BASE = 1.42  # average home goals in an evenly matched game
+AWAY_BASE = 1.16
+HOME_EDGE = 0.06
+RHO = -0.13  # Dixon-Coles low-score dependence
+STRENGTH_SCALE = 15.0  # rating points per unit of log goal-rate difference
 
 
 @dataclass(frozen=True)
@@ -51,7 +54,7 @@ class PlayerLine:
 
 @dataclass
 class History:
-    seasons: list[str]
+    seasons: list[str] = field(default_factory=list)
     matches: list[HistMatch] = field(default_factory=list)
     lines: list[PlayerLine] = field(default_factory=list)
 
@@ -89,38 +92,65 @@ def round_robin(club_ids: list[str]) -> list[list[tuple[str, str]]]:
     return first + second
 
 
-def _poisson(rng: random.Random, lam: float) -> int:
-    limit, k, p = math.exp(-lam), 0, 1.0
-    while True:
-        p *= rng.random()
-        if p <= limit:
-            return k
-        k += 1
+def _pois(k: int, lam: float) -> float:
+    return math.exp(-lam) * lam**k / math.factorial(k)
 
 
-def _weights(players, attr: str, by_pos: dict[Position, float]) -> list[float]:
-    return [max(0.01, by_pos.get(p.position, 0.05) * (getattr(p, attr) / 70.0) ** 3) for p in players]
+def _tau(i: int, j: int, lh: float, la: float, rho: float) -> float:
+    if i == 0 and j == 0:
+        return 1 - lh * la * rho
+    if i == 0 and j == 1:
+        return 1 + lh * rho
+    if i == 1 and j == 0:
+        return 1 + la * rho
+    if i == 1 and j == 1:
+        return 1 - rho
+    return 1.0
 
 
-def simulate_history(league: League, seasons: list[str], seed: int = 7) -> History:
-    rng = random.Random(seed)
-    hist = History(seasons=seasons)
-    strength = {c.club_id: (c.rating - 74) / 22.0 for c in league.clubs}
-    for season in seasons:
-        # strength drifts a little season to season
-        drift = {cid: s + rng.gauss(0, 0.05) for cid, s in strength.items()}
-        schedule = round_robin([c.club_id for c in league.clubs])
-        rng.shuffle(schedule)
-        for md, day in enumerate(schedule, start=1):
-            for home, away in day:
-                lam_h = BASE_GOALS * math.exp(drift[home] - drift[away] + HOME_ADVANTAGE)
-                lam_a = BASE_GOALS * math.exp(drift[away] - drift[home])
-                hg, ag = _poisson(rng, lam_h), _poisson(rng, lam_a)
-                mid = f"{season}-{md:02d}-{home}-{away}"
-                hist.matches.append(HistMatch(mid, season, md, home, away, hg, ag))
-                for cid, opp, gf, ga, is_home in ((home, away, hg, ag, True), (away, home, ag, hg, False)):
-                    hist.lines.extend(_player_lines(rng, league, mid, season, md, cid, opp, gf, ga, is_home))
-    return hist
+def dixon_coles_score(
+    rng: random.Random, lh: float, la: float, rho: float = RHO, max_goals: int = 10
+) -> tuple[int, int]:
+    """Draw a scoreline from the Dixon-Coles corrected bivariate grid (renormalised)."""
+    cells = [
+        (i, j, _pois(i, lh) * _pois(j, la) * _tau(i, j, lh, la, rho))
+        for i in range(max_goals + 1)
+        for j in range(max_goals + 1)
+    ]
+    total = sum(w for _, _, w in cells)
+    r = rng.random() * total
+    acc = 0.0
+    for i, j, w in cells:
+        acc += w
+        if r <= acc:
+            return i, j
+    return cells[-1][0], cells[-1][1]
+
+
+def goal_rates(home_rating: float, away_rating: float) -> tuple[float, float]:
+    d = (home_rating - away_rating) / STRENGTH_SCALE
+    return HOME_BASE * math.exp(d / 2 + HOME_EDGE), AWAY_BASE * math.exp(-d / 2)
+
+
+def simulate_season(
+    rng: random.Random,
+    season: str,
+    ratings: dict[str, float],
+    squads: dict[str, list[Player]],
+) -> tuple[list[HistMatch], list[PlayerLine]]:
+    matches: list[HistMatch] = []
+    lines: list[PlayerLine] = []
+    schedule = round_robin(sorted(ratings))
+    rng.shuffle(schedule)
+    for md, day in enumerate(schedule, start=1):
+        for home, away in day:
+            lh, la = goal_rates(ratings[home], ratings[away])
+            hg, ag = dixon_coles_score(rng, lh, la)
+            mid = f"{season}-{md:02d}-{home}-{away}"
+            matches.append(HistMatch(mid, season, md, home, away, hg, ag))
+            for cid, opp, gf, ga, is_home in ((home, away, hg, ag, True), (away, home, ag, hg, False)):
+                lines.extend(_player_lines(rng, squads[cid], mid, season, md, cid, opp, gf, ga, is_home))
+    return matches, lines
 
 
 SCORER = {
@@ -143,38 +173,39 @@ CREATOR = {
 }
 
 
-def _player_lines(rng, league, mid, season, md, cid, opp, gf, ga, is_home) -> list[PlayerLine]:
-    squad = league.squad(cid)
-    gks = [p for p in squad if p.position == Position.GK]
+def _weight(p: Player, attr: str, by_pos: dict[Position, float]) -> float:
+    return max(0.01, by_pos.get(p.position, 0.05) * (getattr(p, attr) / 70.0) ** 3)
+
+
+def _player_lines(rng, squad, mid, season, md, cid, opp, gf, ga, is_home) -> list[PlayerLine]:
+    gks = sorted((p for p in squad if p.position == Position.GK), key=lambda p: -p.goalkeeping)
     outfield = [p for p in squad if p.position != Position.GK]
+    keeper = gks[0] if rng.random() < 0.9 or len(gks) < 2 else gks[1]
     # a plausible XI: the best keeper (occasionally the second),
-    # then 10 outfield players by rating with rotation noise
-    keeper = gks[0] if rng.random() < 0.9 else gks[1]
+    # then 10 outfield players by quality with rotation noise
     ranked = sorted(
         outfield, key=lambda p: -(p.passing + p.defending + p.shooting + p.pace) / 4 - rng.gauss(0, 4)
     )
     xi = [keeper, *ranked[:10]]
     bench = ranked[10:16]
-    subs_on = rng.sample(bench, k=3)
-    subs_off = rng.sample(xi[1:], k=3)
+    subs_on = rng.sample(bench, k=min(3, len(bench)))
+    subs_off = rng.sample(xi[1:], k=len(subs_on))
     minutes = {p.player_id: 90 for p in xi}
     for off, on in zip(subs_off, subs_on, strict=True):
         m = rng.randint(55, 85)
         minutes[off.player_id] = m
         minutes[on.player_id] = 90 - m
-    on_pitch = list(xi) + subs_on
+    on_pitch = [*xi, *subs_on]
     goals = dict.fromkeys(minutes, 0)
     assists = dict.fromkeys(minutes, 0)
-    sw = _weights(on_pitch, "shooting", SCORER)
-    cw = _weights(on_pitch, "passing", CREATOR)
     for _ in range(gf):
         scorer = rng.choices(
-            on_pitch, weights=[w * minutes[p.player_id] for p, w in zip(on_pitch, sw, strict=True)]
+            on_pitch, weights=[_weight(p, "shooting", SCORER) * minutes[p.player_id] for p in on_pitch]
         )[0]
         goals[scorer.player_id] += 1
         if rng.random() < 0.72:
             pool = [p for p in on_pitch if p.player_id != scorer.player_id]
-            wts = [cw[on_pitch.index(p)] * minutes[p.player_id] for p in pool]
+            wts = [_weight(p, "passing", CREATOR) * minutes[p.player_id] for p in pool]
             assists[rng.choices(pool, weights=wts)[0].player_id] += 1
     out = []
     for p in on_pitch:
