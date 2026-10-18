@@ -62,6 +62,7 @@ ignore = [
 "services/insights/src/matchcut_insights/plain.py" = ["PLR0912"]                    # one template per moment kind
 "services/api/src/matchcut_api/app.py" = ["PLR0915"]                                # app factory: routes close over settings
 "docs/**" = ["E501", "E741"]                                          # diagram generator: drawing coordinates
+"research/voices/kaggle/**" = ["E501", "S603"]                        # standalone Kaggle scripts: embedded test lines, pip bootstrap
 
 [tool.pyright]
 pythonVersion = "3.12"

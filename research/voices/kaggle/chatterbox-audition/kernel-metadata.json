@@ -1,0 +1,19 @@
+{
+    "id":  "KAGGLE_USER/matchcut-chatterbox-audition",
+    "title":  "matchcut chatterbox-audition",
+    "code_file":  "chatterbox_audition.py",
+    "language":  "python",
+    "kernel_type":  "script",
+    "is_private":  true,
+    "enable_gpu":  true,
+    "enable_internet":  true,
+    "dataset_sources":  [
+
+                        ],
+    "competition_sources":  [
+
+                            ],
+    "kernel_sources":  [
+
+                       ]
+}
