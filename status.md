@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D2 complete; D3 in progress
+**Updated:** Sun 18 Oct 2026 · **Phase:** D3 complete (branch `d3/insights`)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -16,9 +16,16 @@
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
 ## Resume here (handoff, 18 Oct)
-- D2 is merged to `main` once CI is green (PR "D2: five-season universe, analytics, League Memory, data camera").
-- D3 is in progress on branch `d3/insights` (worktree `../matchcut-d3`): insights agents, API and Studio v0 are built and tested; the eval report and the PR are next.
-- Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 (CC0) and CMU soccer mocap in `assets-cc0/`. Blender is installed. Still to fetch: Poly Haven textures.
+- D2 merged (#3). D3 PR open from `d3/insights`; merge on green CI.
+- Next: D4 (3D show camera with quality tiers + vision lane). First steps: Poly Haven CC0 textures; Blender retarget pipeline (Mixamo private, Quaternius CC0, CMU) onto one rig; Three.js scene.
+- Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 and CMU soccer mocap in `assets-cc0/`. Blender installed.
+
+## Done in D3 (18 Oct)
+- **Contracts 1.2.0:** `Fact` and `Cue` (verification status, checks, latency).
+- **Insights agents** (ADR-0010) on Microsoft Agent Framework 1.22 with Foundry `gpt-5-mini`, keyless: code-built fact sheets and instant plain cards; Analyst ‖ Historian (League Memory over MCP, claims grounded against real tool answers) → Writer → deterministic Verifier (one feedback retry) → Localiser (translations re-verified). Scorecard: `reports/insights-eval.md`.
+- **API:** access code → signed HttpOnly SameSite=Strict session; rate limits; strict CSP and security headers; cue replay over SSE.
+- **Studio v0:** broadcast lower third with cut-in motion, Verified stamp, evidence panel, four languages, replay speed.
+- **Quality:** ruff, pyright and schema drift clean; tests 90% coverage; CI runs with no cloud access (scripted brain).
 
 ## Done in D2 (18 Oct)
 - **Five-season universe** (ADR-0007): Dixon-Coles results, 26 clubs with promotion and relegation, ageing curves, retirements, transfers, academy; permanent player IDs; current season matchdays 1–8 played, live match on matchday 9.
@@ -28,9 +35,9 @@
 - **Data camera** (ADR-0009): Skia broadcast renderer with director, per-frame camera truth and screen boxes for the vision lane.
 - **Quality:** 46 tests, 90% coverage; ruff and pyright clean; contracts 1.1.0.
 
-## Next (D3)
-1. Live agents on Foundry with Agent Framework (Analyst ‖ Historian → Writer → Verifier → Localiser) + eval suite.
-2. API (SSE) and the Studio screen v0.
+## Next (D4)
+1. 3D show camera (Three.js; Low/Medium/High tiers, High default; 2D fallback) driven by tracking.
+2. Vision lane (auto-eventing from rendered video, scored against camera truth).
 
 ## Decisions log
 | Date | Decision |
@@ -39,5 +46,6 @@
 | 17 Oct | Auto-eventing from video in scope; AI narration for the demo film |
 | 18 Oct | Show camera animation sources: Mixamo (football actions, raw files kept private, baked into the app, never in the public repo), CMU motion capture, Quaternius CC0; public repo falls back to CMU + Quaternius. Automatic Low/Medium/High quality with 2D fallback; High is the default and the demo standard |
 | 18 Oct | Five seasons with squad evolution; show camera (premium stylised 3D) approved; video-game quality on the roadmap |
+| 18 Oct | League Memory on MCP SDK 1.x, the range Agent Framework supports (ADR-0010) |
 | 18 Oct | Tactical-shift cards state what was measured ("pressing harder", PPDA before and after), not a coach's intent |
 | 18 Oct | Agent-based tracking-first engine (ADR-0002); Event Hubs backbone (ADR-0003); Container Apps + Jobs (ADR-0004); keyless security (ADR-0005); uv monorepo (ADR-0006) |

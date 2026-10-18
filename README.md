@@ -18,13 +18,33 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed automaticall
 
 ```bash
 uv sync                                   # install the locked workspace
-uv run matchcut-sim league                # 20 clubs, 500 players, 2 seasons of history -> data/league
+uv run matchcut-sim league                # 26 clubs, five seasons of history -> data/league
+uv run matchcut-memory-build              # League Memory database -> data/league/memory.sqlite
 uv run matchcut-sim match --home kes --away irv --seed 7   # one full match: events, 10 Hz tracking, truth
 uv run matchcut-sim realism --matches 12  # compare simulated matches with top-flight norms
-uv run pytest                             # tests
+uv run pytest                             # tests (no cloud access needed)
 ```
 
-The same seed always produces the same match. [Latest realism report](reports/realism.md).
+### Live insights agents (Azure AI Foundry)
+
+Sign in with an Entra ID account that has *Cognitive Services OpenAI User* on the Foundry resource (no keys are used), then:
+
+```bash
+export AZURE_OPENAI_ENDPOINT=https://<your-foundry-resource>.cognitiveservices.azure.com/
+export AZURE_OPENAI_MODEL=gpt-5-mini
+uv run matchcut-insights run --home kes --away wcr --seed 7     # verified cues -> out/insights/kes-wcr-7.jsonl
+uv run matchcut-insights eval --matches 2                      # scorecard -> reports/insights-eval.md
+```
+
+### Studio
+
+```bash
+export MATCHCUT_ACCESS_CODE_SHA256=$(printf '%s' 'choose-a-code' | sha256sum | cut -d' ' -f1)
+export MATCHCUT_INSECURE_COOKIE=1   # local http only
+uv run matchcut-api                 # http://127.0.0.1:8080
+```
+
+The same seed always produces the same match. Reports: [realism](reports/realism.md) · [tactical detection](reports/tactical-detection.md) · [insights agents](reports/insights-eval.md).
 
 ## Brand
 

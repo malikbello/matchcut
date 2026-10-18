@@ -41,6 +41,18 @@ from matchcut_sim.league import (
     surname,
 )
 
+# shirt numbers a founding squad would wear by position; later signings take free numbers
+TRADITIONAL_SHIRTS: dict[Position, tuple[int, ...]] = {
+    Position.GK: (1,),
+    Position.FB: (2, 3),
+    Position.CB: (5, 4, 6),
+    Position.DM: (6,),
+    Position.CM: (8, 14),
+    Position.AM: (10,),
+    Position.W: (7, 11),
+    Position.ST: (9,),
+}
+
 FIRST_SEASON_START = 2021
 SEASONS = 5
 CURRENT_PLAYED = 8  # matchdays of the current season already played before the live match
@@ -114,11 +126,26 @@ class _Builder:
                         year=FIRST_SEASON_START,
                         age=self.rng.randint(18, 33),
                     )
+            self._number_founding_squad(cid)
 
     # ------------------------------------------------------------ players
-    def _free_shirt(self, cid: str) -> int:
+    def _number_founding_squad(self, cid: str) -> None:
+        """Within each position the best player takes the traditional number (the best striker wears 9)."""
+        squad = [self.players[p] for p in self.squads[cid]]
+        numbers = {p.player_id: p.shirt_number for p in squad}
+        for pos in Position:
+            group = [p for p in squad if p.position == pos]
+            slots = sorted(numbers[p.player_id] for p in group)
+            preferred = [n for n in TRADITIONAL_SHIRTS.get(pos, ()) if n in slots]
+            order = preferred + [n for n in slots if n not in preferred]
+            for player, number in zip(sorted(group, key=overall, reverse=True), order, strict=True):
+                self.players[player.player_id] = player.model_copy(update={"shirt_number": number})
+
+    def _free_shirt(self, cid: str, pos: Position | None = None) -> int:
+        """Traditional numbers for each position first (9 for the striker), then the club's free pool."""
         used = {self.players[p].shirt_number for p in self.squads[cid]}
-        return next(n for n in SHIRT_POOL if n not in used)
+        preferred = TRADITIONAL_SHIRTS.get(pos, ()) if pos is not None else ()
+        return next(n for n in (*preferred, *SHIRT_POOL) if n not in used)
 
     def _new_player(self, cid: str, pos: Position, level: float, year: int, age: int) -> Player:
         pid = f"p{self.next_id:05d}"
@@ -132,7 +159,7 @@ class _Builder:
             club_id=cid,
             name=f"{self.rng.choice(GIVEN)} {sn}",
             known_as=sn,
-            shirt_number=self._free_shirt(cid),
+            shirt_number=self._free_shirt(cid, pos),
             position=pos,
             foot=Foot.LEFT if self.rng.random() < 0.24 else Foot.RIGHT,
             birth_year=year - age,
