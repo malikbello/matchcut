@@ -38,6 +38,14 @@ Matchcut serves fans in their own language, starting with Nigerian fans and Arab
   - Arabic cards read right to left in IBM Plex Sans Arabic, while the pitch never mirrors;
   - fonts include the subsets that carry Yoruba and Igbo dotted vowels and tone marks.
 
+## Adding a language (how expansion scales)
+Languages are data, not code. To add one:
+1. Add an entry to `LANGUAGES` in `services/insights/src/matchcut_insights/languages.py`: BCP 47 tag, names, a style guide for the Localiser, direction, voice (`azure:<voice>` or a self-hosted provider prefix) and moods per kind of moment.
+2. Add play-by-play templates to `TEMPLATES` in `calls.py` (or leave the language caption-only).
+3. Check fonts cover its script (Studio `fonts/`), and add right-to-left if needed.
+4. Run the eval and the native review sheet; a language ships only after a native speaker passes it.
+The Verifier, API, Studio menus and voice cache need no change. Yoruba, Hausa and Igbo voices are planned for production this way.
+
 ## Consequences
 - Nigerian fans get Nigerian English and Pidgin with real Nigerian voices today.
 - Correctness is guaranteed in every language. Naturalness is not machine-checkable, so each language needs a native review before we call it supported.
