@@ -1,0 +1,1 @@
+﻿players.glb and moves.glb are built by apps/studio/scripts/assets.mjs from the Universal Animation Library and Universal Animation Library 2 by Quaternius (quaternius.com), released under CC0 1.0 Universal (public domain): https://creativecommons.org/publicdomain/zero/1.0/

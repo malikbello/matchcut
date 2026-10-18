@@ -23,11 +23,14 @@ const LRI = String.fromCharCode(0x2066), PDI = String.fromCharCode(0x2069);
 const isolateNumbers = (text, lang) => (RTL.has(lang) ? text.replace(/[0-9]+(?:[.,][0-9]+)?(?:-[0-9]+)?(?: ?xG)?/g, (m) => LRI + m + PDI) : text);
 const CUE_SECONDS = 7; // on screen for 7 s of wall time at any replay speed
 const PITCH = { L: 105, W: 68 };
+// how loud the 3D crowd gets while a moment's card is on screen (0 calm to 1 eruption)
+const EXCITEMENT = { goal: 1, big_chance: 0.75, great_save: 0.7, card: 0.45, speed_peak: 0.4 };
+const now = () => performance.now();
 
 const state = {
   match: null, feed: null, cues: [], moments: [], t: 0, end: 5400000, playing: true, speed: 15,
   shown: null, shownAt: 0, lastFrame: performance.now(), trail: [], dpr: 1,
-  sound: true, audio: new Audio(),
+  sound: true, audio: new Audio(), view: "3d", show: null,
 };
 state.audio.addEventListener("playing", () => $("sound").classList.add("speaking"));
 state.audio.addEventListener("ended", () => $("sound").classList.remove("speaking"));
@@ -85,6 +88,40 @@ async function loadMatch(match) {
   }
   await loadCues();
   seek(0);
+  if (state.view === "3d") startShow();
+}
+
+// ------------------------------------------------------------ 3D show camera
+// Loaded on demand as its own bundle; any failure (no WebGL, a slow device that keeps
+// stepping down, a load error) falls back to the 2D data pitch with the same clock.
+async function startShow() {
+  state.show?.dispose(); state.show = null;
+  if (!state.feed) return setView("2d");
+  $("show-loading").hidden = false;
+  try {
+    const mod = await import("./dist/show3d.js");
+    if (!mod.webglAvailable()) throw new Error("WebGL2 unavailable");
+    state.show = await mod.createShow({
+      canvas: $("show"), feed: state.feed, assets: "assets/3d",
+      onQuality: (tier) => console.info(`show camera quality: ${tier}`),
+    });
+    state.show.setMode($("cam").value);
+    if (location.hostname === "127.0.0.1") window.__show = state.show; // local tuning only
+  } catch (err) {
+    console.warn("3D show camera unavailable, using the 2D pitch", err);
+    setView("2d");
+  } finally {
+    $("show-loading").hidden = true;
+  }
+}
+function setView(view) {
+  state.view = view;
+  const is3d = view === "3d";
+  $("view-3d").setAttribute("aria-pressed", String(is3d));
+  $("view-2d").setAttribute("aria-pressed", String(!is3d));
+  $("show").hidden = !is3d; $("pitch").hidden = is3d; $("cam-wrap").hidden = !is3d;
+  if (is3d && !state.show && state.feed) startShow();
+  if (!is3d) resize();
 }
 async function loadCues() {
   state.cues = await api(`/api/matches/${encodeURIComponent(state.match.match_id)}/cues?lang=${$("lang").value}`);
@@ -269,6 +306,13 @@ function renderPitch(W, H, d, X, Y, s) {
   return off;
 }
 function draw() {
+  if (state.view === "3d" && state.show && state.feed) {
+    const lit = state.shown && fact(state.shown, "player involved");
+    const excitement = state.shown && now() - state.shownAt < 6000 ? EXCITEMENT[state.shown.kind] : null;
+    state.show.render(state.t, { spotlight: lit ? lit.value : null, excitement });
+    return;
+  }
+  if (state.view === "3d" || !canvas.width || !canvas.height) return; // 3D still loading, or not on screen
   const W = canvas.width, H = canvas.height, d = state.dpr;
   const pad = 0.06 * W;
   const sx = (W - 2 * pad) / PITCH.L, sy = (H - 2 * pad * 0.55) / PITCH.W, s = Math.min(sx, sy);
@@ -365,6 +409,9 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!state.sound) { state.audio.pause(); $("sound").classList.remove("speaking"); }
   });
   $("speed").addEventListener("change", () => { state.speed = Number($("speed").value); });
+  $("view-3d").addEventListener("click", () => setView("3d"));
+  $("view-2d").addEventListener("click", () => setView("2d"));
+  $("cam").addEventListener("change", () => state.show?.setMode($("cam").value));
   $("lang").addEventListener("change", async () => { await loadCues(); seek(state.t); });
   $("match").addEventListener("change", () => loadMatch(state.list.find((m) => m.match_id === $("match").value)));
   const scrub = $("scrubber");
@@ -378,6 +425,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   window.addEventListener("resize", resize);
   state.speed = Number($("speed").value);
+  setView(state.view);
   requestAnimationFrame(tick);
   start().catch(() => showGate()); // an existing session skips the gate
 });
