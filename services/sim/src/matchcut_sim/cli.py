@@ -195,7 +195,8 @@ def cmd_eval_tactics(args: argparse.Namespace) -> None:
             "",
             f"{args.matches} full matches; each contains one hidden tactical change "
             "(a switch to a high press).",
-            "A detection counts if it names the right team within 7 minutes after the change.",
+            "A detection counts if it names the right team within 10 minutes after the change.",
+            "Detector settings were tuned on 16 separate matches (seeds 400-415); these 8 are held out.",
             "",
             f"**Precision {precision:.0%} · Recall {recall:.0%}**",
             "",

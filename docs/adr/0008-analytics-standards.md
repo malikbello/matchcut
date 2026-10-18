@@ -12,7 +12,9 @@ Analysts, broadcasters and judges trust numbers they recognise. Home-made formul
 - **Pressing:** PPDA, using the conventional defensive-60% zone.
 - **Territory and possession:** field tilt and possession share by pass attempts (the common broadcast method).
 - **Momentum:** exponentially weighted threat difference; **control vs chaos** from turnover rate and completion.
-- **Tactical change detection:** one-sided CUSUM change-point tests on defensive-line height (from tracking) and high-pressure frequency. Scored for precision and recall against the simulator's hidden truth.
+- **Tactical change detection:** PPDA (opponent passes in their own defensive 60% per defensive action there) over the last 8 minutes against the previous 20, lightly smoothed; a shift is a fall to 55% or less. Settings were tuned on 16 separate matches and reported on 8 held-out matches (precision 83%, recall 62%). Scored against the simulator's hidden truth.
+  - Rejected after measurement: CUSUM on defensive-line height (precision 6%: it tracked territory, not tactics), raw pressing counts (precision 9%: they track opponent possession) and a tracking signal of defenders near the ball (F1 0.40 vs 0.50 on the tuning set).
+  - The on-screen claim is what was measured ("pressing harder", with PPDA before and after), never a coach's intent.
 - **Synthetic-data validation:** the "validation trinity" of fidelity (the realism report against published benchmarks), utility (downstream detection scored against truth) and privacy (fully fictional).
 - **Interoperability (planned):** export events, tracking and metadata in the **Common Data Format (CDF) v1.0** (Anzer et al., 2025; authors from FIFA, DFB and RB Leipzig), so any CDF-aware tool can read Matchcut's feed.
 

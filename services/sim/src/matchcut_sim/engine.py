@@ -170,7 +170,11 @@ class _Engine:
         self.events: list[MatchEvent] = []
         self.truth: list[TruthRecord] = []
         self.seq = 0
-        self.tactic_change = (self.r.randint(0, 1), self.r.uniform(55, 70) * 60, False)
+        # the coach with room to press harder makes the switch (a side already pressing flat out cannot);
+        # the draw is kept so the random stream, and every match before the change, is unchanged
+        self.r.randint(0, 1)
+        presser = int(self.style[1]["press_intensity"] < self.style[0]["press_intensity"])
+        self.tactic_change = (presser, self.r.uniform(55, 70) * 60, False)
         # recording
         self.rec_t: list[int] = []
         self.rec_period: list[int] = []
@@ -575,7 +579,7 @@ class _Engine:
             )
         )
         foot = BodyPart.LEFT_FOOT if self.slot_player[c].foot.value == "left" else BodyPart.RIGHT_FOOT
-        if not is_goal and blockers and self.r.random() < 0.55:
+        if not is_goal and blockers and self.r.random() < 0.48:
             b = blockers[0]
             bx_, by_ = float(self.pos[b][0]), float(self.pos[b][1])
             eid = self.emit(
