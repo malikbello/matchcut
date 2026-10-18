@@ -225,6 +225,23 @@ def cmd_eval_tactics(args: argparse.Namespace) -> None:
     print(f"precision {precision:.2f} recall {recall:.2f} -> {out}")
 
 
+def cmd_feed(args: argparse.Namespace) -> None:
+    from matchcut_sim.feed import write_feed  # noqa: PLC0415 - keeps the default CLI start fast
+
+    league = build_league(args.league_seed)
+    m = simulate_match(league, args.home, args.away, args.seed)
+    print(f"feed -> {write_feed(m, league, args.out)}")
+
+
+def cmd_cdf(args: argparse.Namespace) -> None:
+    from matchcut_sim.cdf import export_cdf  # noqa: PLC0415 - keeps the default CLI start fast
+
+    league = build_league(args.league_seed)
+    m = simulate_match(league, args.home, args.away, args.seed)
+    out = export_cdf(m, league, args.out, every=args.every)
+    print(f"CDF {out} (match.json, meta.json, event.jsonl, tracking.jsonl)")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="matchcut-sim")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -264,6 +281,21 @@ def main(argv: list[str] | None = None) -> None:
     g.add_argument("--league-seed", type=int, default=2026)
     g.add_argument("--out", default="reports/tactical-detection.md")
     g.set_defaults(fn=cmd_eval_tactics)
+    h = sub.add_parser("cdf", help="export one match in the Common Data Format (CDF v0.3.2)")
+    h.add_argument("--home", default="kes")
+    h.add_argument("--away", default="irv")
+    h.add_argument("--seed", type=int, default=7)
+    h.add_argument("--every", type=int, default=1, help="write every Nth 10 Hz tracking frame")
+    h.add_argument("--league-seed", type=int, default=2026)
+    h.add_argument("--out", default="out/cdf")
+    h.set_defaults(fn=cmd_cdf)
+    f = sub.add_parser("feed", help="write the compact 5 Hz screen feed for one match")
+    f.add_argument("--home", default="kes")
+    f.add_argument("--away", default="irv")
+    f.add_argument("--seed", type=int, default=7)
+    f.add_argument("--league-seed", type=int, default=2026)
+    f.add_argument("--out", default="out/feeds")
+    f.set_defaults(fn=cmd_feed)
     args = p.parse_args(argv)
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8")  # Windows consoles default to cp1252

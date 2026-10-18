@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Sequence
 from typing import Any, Protocol, Self
 
@@ -44,9 +45,20 @@ class HistoryNote(BaseModel):
     claims: list[HistoryClaim] = Field(max_length=3)
 
 
+class NumberRef(BaseModel):
+    text: str = Field(description="A number exactly as written in the line, e.g. '0.92' or '51'")
+    fact_id: str = Field(description="The fact that states this number")
+
+
 class Line(BaseModel):
     text: str = Field(description="One broadcast line")
     cited_fact_ids: list[str] = Field(description="Every fact ID the line uses")
+    numbers: list[NumberRef] = Field(
+        default_factory=list, description="Every number in the line, in order of appearance, with its fact"
+    )
+
+    def number_refs(self) -> list[tuple[str, str]]:
+        return [(n.text, n.fact_id) for n in self.numbers]
 
 
 class Translation(BaseModel):
@@ -90,14 +102,19 @@ fewer, British English, vivid but factual. Rules that are checked by code:
 - every name you write must appear in a fact you cite;
 - keep the unit a fact's label gives (percent, km/h, xG);
 - cite the ID of every fact you use, and only IDs from the fact sheet;
-- no betting language and no league or brand names.
+- list every number you write, in order, with the ID of the fact that states it
+  (a score like 2-1 is one entry);
+- no betting language and no league or brand names;
+- no em dashes: use a colon, comma or full stop.
 Prefer one striking fact a fan would care about (a milestone, chance quality, top
-speed, a run of form) over many, and over abstract indices such as momentum. If
+speed, a run of form) over many, and over abstract indices such as momentum. Use a
+shirt number only when it adds something. If
 feedback from the Verifier is given, fix exactly those problems."""
 
 LOCALISER = """You are the Localiser. Translate the broadcast line into each requested language for
 on-screen graphics, natural to football fans in that language. Keep every number and
-every proper name exactly as written. Do not add or remove information."""
+every proper name exactly as written. Do not add or remove information. Never use
+em dashes."""
 
 
 def _facts_block(facts: Sequence[Fact]) -> str:
@@ -137,8 +154,8 @@ class AgentBrain:
         if memory_db:
             tool = MCPStdioTool(
                 name="league_memory",
-                command="matchcut-memory",
-                args=["--db", memory_db],
+                command=sys.executable,  # same interpreter: no PATH lookup, works in any container
+                args=["-m", "matchcut_memory.server", "--db", memory_db],
                 description="League Memory: read-only history of the league",
                 approval_mode="never_require",
             )

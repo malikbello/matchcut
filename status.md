@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D3 complete (branch `d3/insights`)
+**Updated:** Sun 18 Oct 2026 · **Phase:** D3.1 (mature stack and Studio v1) in review
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -19,6 +19,16 @@
 - D2 merged (#3). D3 PR open from `d3/insights`; merge on green CI.
 - Next: D4 (3D show camera with quality tiers + vision lane). First steps: Poly Haven CC0 textures; Blender retarget pipeline (Mixamo private, Quaternius CC0, CMU) onto one rig; Three.js scene.
 - Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 and CMU soccer mocap in `assets-cc0/`. Blender installed.
+
+## Done in D3.1 (18 Oct): adopt proven components, Studio v1 (ADR-0011)
+- Agents run as a Microsoft Agent Framework workflow; OpenTelemetry tracing to Application Insights (off unless configured).
+- Attributed numbers: the Writer lists each number with its fact; the Verifier checks every pairing. House style bans em dashes (also a CI guard).
+- Verifier red team: 709 of 709 planted false lines caught, 0 of 128 true lines rejected (`reports/verifier-redteam.md`).
+- Live scorecard with Azure AI Evaluation: 88% verified, groundedness 4.57 of 5, relevance 3.93 of 5, about $0.005 per moment (`reports/insights-eval.md`).
+- API on standard libraries: Starlette sessions, `limits`, `sse-starlette`; positions feed served pre-compressed; CSP now `'self'` only.
+- CDF v0.3.2 export, validated in CI by the official validator (strict).
+- Studio v1: event-driven score bug with possession line, live 2D data pitch (the show camera's fallback tier), one match clock with scrubber and team-coloured markers, hero-number lower third, Verified stamp, evidence panel, custom icon set, self-hosted fonts.
+- Open: confirm the Studio frame rate on a real laptop GPU (the headless test browser renders at about 1.5 fps on any painting page).
 
 ## Done in D3 (18 Oct)
 - **Contracts 1.2.0:** `Fact` and `Cue` (verification status, checks, latency).
@@ -46,6 +56,7 @@
 | 17 Oct | Auto-eventing from video in scope; AI narration for the demo film |
 | 18 Oct | Show camera animation sources: Mixamo (football actions, raw files kept private, baked into the app, never in the public repo), CMU motion capture, Quaternius CC0; public repo falls back to CMU + Quaternius. Automatic Low/Medium/High quality with 2D fallback; High is the default and the demo standard |
 | 18 Oct | Five seasons with squad evolution; show camera (premium stylised 3D) approved; video-game quality on the roadmap |
+| 18 Oct | Voice and languages: live voiced commentary (British and Nigerian English, Arabic on Azure Speech); captions also in Yoruba, Hausa, Igbo and Nigerian Pidgin; their voices only if an open model passes licence and native listening checks |
 | 18 Oct | League Memory on MCP SDK 1.x, the range Agent Framework supports (ADR-0010) |
 | 18 Oct | Tactical-shift cards state what was measured ("pressing harder", PPDA before and after), not a coach's intent |
 | 18 Oct | Agent-based tracking-first engine (ADR-0002); Event Hubs backbone (ADR-0003); Container Apps + Jobs (ADR-0004); keyless security (ADR-0005); uv monorepo (ADR-0006) |
