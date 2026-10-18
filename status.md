@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D3.2 (voices and languages) in review
+**Updated:** Sun 18 Oct 2026 · **Phase:** D4 (3D show camera and vision lane) started; D3.2 merged (#7)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -16,7 +16,8 @@
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
 ## Resume here (handoff, 18 Oct)
-- D2 merged (#3). D3 PR open from `d3/insights`; merge on green CI.
+- D3.2 merged (#7, 46ceb23). Work continues on branch `d4/show-camera`.
+- Waiting: YarnGPT2 trial for Yoruba, Hausa and Igbo voices (needs about 3 GB free memory); native review of Yoruba, Hausa, Igbo, Pidgin and Arabic lines.
 - Next: D4 (3D show camera with quality tiers + vision lane). First steps: Poly Haven CC0 textures; Blender retarget pipeline (Mixamo private, Quaternius CC0, CMU) onto one rig; Three.js scene.
 - Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 and CMU soccer mocap in `assets-cc0/`. Blender installed.
 

@@ -4,12 +4,14 @@ Tags are BCP 47. Voices come from Azure AI Speech where it has one; Yoruba, Haus
 and Igbo use YarnGPT2 (Apache-2.0, self-hosted) once it passes a native listening
 check, and are caption-only until then. Player and club names stay in Latin script
 in every language, as broadcasters show squad names, so the Verifier can still
-check them.
+check them. Voices with emotion styles (Microsoft MAI-Voice-2.1) get a mood per
+kind of moment: joy for a goal, surprise for a big chance or a great save.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -20,6 +22,10 @@ class Language:
     style: str  # guidance for the Localiser
     rtl: bool = False
     voice: str | None = None  # "azure:<voice>" or "yarngpt:<speaker>"; None = captions only
+    moods: Mapping[str, str] = field(default_factory=dict)  # moment kind -> voice style
+
+    def mood(self, kind: str) -> str | None:
+        return self.moods.get(kind)
 
 
 LANGUAGES: dict[str, Language] = {
@@ -30,7 +36,8 @@ LANGUAGES: dict[str, Language] = {
             "English (British broadcast)",
             "English",
             "understated UK broadcast: judgement, then the number",
-            voice="azure:en-GB-RyanNeural",
+            voice="azure:en-GB-Harry:MAI-Voice-2.1",
+            moods={"goal": "joyful", "big_chance": "surprised", "great_save": "surprised"},
         ),
         Language(
             "en-NG",
@@ -64,7 +71,14 @@ LANGUAGES: dict[str, Language] = {
             "rhythmic, celebratory Spanish broadcast",
             voice="azure:es-ES-AlvaroNeural",
         ),
-        Language("fr", "French", "Français", "lively French broadcast", voice="azure:fr-FR-HenriNeural"),
+        Language(
+            "fr",
+            "French",
+            "Français",
+            "lively French broadcast",
+            voice="azure:fr-FR-Marc:MAI-Voice-2.1",
+            moods={"goal": "shouting", "big_chance": "surprised", "great_save": "surprised"},
+        ),
         Language("pt", "Portuguese", "Português", "Portuguese broadcast", voice="azure:pt-PT-DuarteNeural"),
     )
 }

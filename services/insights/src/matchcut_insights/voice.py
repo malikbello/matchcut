@@ -2,12 +2,15 @@
 
 Only verified lines are spoken. SSML handles what a football voice must get right:
 scores read the way fans say them ("one nil", "uno a cero"), "xG" and "PPDA" said
-as letters, and a slightly brisk broadcast pace. Audio is made once per cue and
-cached as MP3 next to the match's other media.
+as letters. Expressive voices (MAI-Voice-2.1) speak with the moment's mood (joy
+for a goal, surprise for a big chance); classic voices get a slightly brisk
+broadcast pace instead. Audio is made once per cue and voice, and cached as MP3
+next to the match's other media, with a manifest of which voice made each file.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 from collections.abc import Callable
@@ -34,8 +37,8 @@ SCORE_SPEECH = {
 SPELL = {"xG": "x G", "PPDA": "P P D A"}
 
 
-def ssml(text: str, lang: str, voice: str) -> str:
-    """Build SSML for one line: escape, then mark up scores and abbreviations."""
+def ssml(text: str, lang: str, voice: str, style: str | None = None) -> str:
+    """Build SSML for one line: escape, mark up scores and abbreviations, then set the delivery."""
     sep, zero = SCORE_SPEECH.get(lang, (" ", None))
 
     def say_score(m: re.Match[str]) -> str:
@@ -46,9 +49,14 @@ def ssml(text: str, lang: str, voice: str) -> str:
     for written, spoken in SPELL.items():
         body = body.replace(written, f'<sub alias="{spoken}">{written}</sub>')
     locale = voice.split("-", 2)[0] + "-" + voice.split("-", 2)[1]
+    if style:
+        body = f'<mstts:express-as style="{style}">{body}</mstts:express-as>'
+    elif ":" not in voice:  # classic neural voice: lift the pace; expressive voices set their own
+        body = f'<prosody rate="+6%">{body}</prosody>'
     return (
-        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="{locale}">'
-        f'<voice name="{voice}"><prosody rate="+6%">{body}</prosody></voice></speak>'
+        f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
+        f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="{locale}">'
+        f'<voice name="{voice}">{body}</voice></speak>'
     )
 
 
@@ -74,15 +82,15 @@ class AzureSpeech:
             lambda: credential.get_token("https://cognitiveservices.azure.com/.default").token,
         )
 
-    def synthesize(self, text: str, lang: str) -> tuple[bytes, str] | None:
+    def synthesize(self, text: str, lang: str, kind: str = "") -> tuple[bytes, str] | None:
         """Return (mp3 bytes, voice id), or None when the language has no Azure voice."""
-        spec = LANGUAGES.get(lang)
-        if spec is None or not spec.voice or not spec.voice.startswith("azure:"):
+        key = voice_key(lang, kind)
+        if key is None or not key.startswith("azure:"):
             return None
-        voice = spec.voice.split(":", 1)[1]
+        voice, _, style = key.split(":", 1)[1].partition("#")
         r = self.client.post(
             self.url,
-            content=ssml(text, lang, voice).encode("utf-8"),
+            content=ssml(text, lang, voice, style or None).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer aad#{self.resource_id}#{self.token()}",
                 "Content-Type": "application/ssml+xml",
@@ -91,29 +99,54 @@ class AzureSpeech:
             },
         )
         r.raise_for_status()
-        return r.content, spec.voice
+        return r.content, key
+
+
+def voice_key(lang: str, kind: str = "") -> str | None:
+    """The voice and mood for a line, e.g. 'azure:en-GB-Harry:MAI-Voice-2.1#joyful'."""
+    spec = LANGUAGES.get(lang)
+    if spec is None or not spec.voice:
+        return None
+    mood = spec.mood(kind)
+    return f"{spec.voice}#{mood}" if mood else spec.voice
+
+
+MANIFEST = "voices.json"  # cue ID -> voice key, so a voice change re-renders only what changed
 
 
 def voice_cues(cues: list, speech: AzureSpeech, media_root: str | Path) -> int:
     """Voice each verified cue whose language has a voice; set audio and voice. Returns how many."""
     root = Path(media_root)
+    manifests: dict[Path, dict[str, str]] = {}
     done = 0
     for i, cue in enumerate(cues):
         if cue.status.value != "verified":
             continue
+        key = voice_key(cue.language, cue.kind.value)
+        if key is None:
+            continue
         rel = Path("audio") / cue.match_id / f"{cue.cue_id}.mp3"
         target = root / rel
-        if target.is_file():
-            spec = LANGUAGES.get(cue.language)
-            cues[i] = cue.model_copy(update={"audio": rel.as_posix(), "voice": spec.voice if spec else None})
-            done += 1
-            continue
-        result = speech.synthesize(cue.text, cue.language)
-        if result is None:
-            continue
-        audio, voice = result
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(audio)
-        cues[i] = cue.model_copy(update={"audio": rel.as_posix(), "voice": voice})
+        manifest = manifests.setdefault(target.parent, _read_manifest(target.parent))
+        if not (target.is_file() and manifest.get(cue.cue_id) == key):
+            result = speech.synthesize(cue.text, cue.language, cue.kind.value)
+            if result is None:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(result[0])
+            manifest[cue.cue_id] = key
+        cues[i] = cue.model_copy(update={"audio": rel.as_posix(), "voice": key})
         done += 1
+    for folder, manifest in manifests.items():
+        if manifest:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True), encoding="utf-8")
     return done
+
+
+def _read_manifest(folder: Path) -> dict[str, str]:
+    try:
+        data = json.loads((folder / MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
