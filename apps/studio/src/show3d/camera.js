@@ -31,6 +31,11 @@ export class Director {
       pos = new THREE.Vector3(bx * 0.35, 62, -(W / 2 + 58));
       look = new THREE.Vector3(bx * 0.4, 0, 2);
       fov = 42;
+    } else if (this.mode === "tight") {
+      // the close camera on the ball, from the main-stand side like a handheld touchline camera
+      pos = new THREE.Vector3(ball.x - 3, 5.5, ball.z - 15);
+      look = new THREE.Vector3(ball.x, 0.9, ball.z);
+      fov = 34;
     } else if (this.mode === "goal") {
       const side = bx >= 0 ? 1 : -1;
       pos = new THREE.Vector3(side * (L / 2 + 16), 7, bz * 0.25);
