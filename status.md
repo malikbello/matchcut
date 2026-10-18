@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D1, foundations (branch `d1/foundations`)
+**Updated:** Sun 18 Oct 2026 · **Phase:** D2 complete; D3 in progress
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -15,15 +15,29 @@
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
-## Next (D2)
-1. Match-state engine: xG, possession value, PPDA, field tilt, momentum, control vs chaos.
-2. Moment detector.
-3. TV camera renderer v0 (tracking → broadcast frames → HLS/MP4).
-4. League Memory: Azure SQL schema + MCP server (read-only, parameterised tools).
+## Resume here (handoff, 18 Oct)
+- D2 is merged to `main` once CI is green (PR "D2: five-season universe, analytics, League Memory, data camera").
+- D3 is in progress on branch `d3/insights` (worktree `../matchcut-d3`): insights agents, API and Studio v0 are built and tested; the eval report and the PR are next.
+- Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 (CC0) and CMU soccer mocap in `assets-cc0/`. Blender is installed. Still to fetch: Poly Haven textures.
+
+## Done in D2 (18 Oct)
+- **Five-season universe** (ADR-0007): Dixon-Coles results, 26 clubs with promotion and relegation, ageing curves, retirements, transfers, academy; permanent player IDs; current season matchdays 1–8 played, live match on matchday 9.
+- **Realism: 14 of 14 measures in range** over 12 matches. Conversion 10.0% (Premier League ~10.3%), inside the box 13.4% (~13%), outside 4.9% (~4%), outside-box share 40.5% (~43%). Research record: `docs/research/data-calibration.md`.
+- **Analytics package** (ADR-0008): xG; expected threat trained on our matches (Singh 2019); PPDA, field tilt, momentum, control vs chaos, sprints; moment detector; tactical shifts found with PPDA (tuned on 16 separate matches; held-out precision 83%, recall 62%, `reports/tactical-detection.md`).
+- **League Memory:** SQLite (Azure SQL later) + MCP server (official SDK) with 6 read-only tools; every answer carries a query ID and evidence.
+- **Data camera** (ADR-0009): Skia broadcast renderer with director, per-frame camera truth and screen boxes for the vision lane.
+- **Quality:** 46 tests, 90% coverage; ruff and pyright clean; contracts 1.1.0.
+
+## Next (D3)
+1. Live agents on Foundry with Agent Framework (Analyst ‖ Historian → Writer → Verifier → Localiser) + eval suite.
+2. API (SSE) and the Studio screen v0.
 
 ## Decisions log
 | Date | Decision |
 |---|---|
 | 17 Oct | Matchcut approved; solo build; $0 spend; repo private until submission day |
 | 17 Oct | Auto-eventing from video in scope; AI narration for the demo film |
+| 18 Oct | Show camera animation sources: Mixamo (football actions, raw files kept private, baked into the app, never in the public repo), CMU motion capture, Quaternius CC0; public repo falls back to CMU + Quaternius. Automatic Low/Medium/High quality with 2D fallback; High is the default and the demo standard |
+| 18 Oct | Five seasons with squad evolution; show camera (premium stylised 3D) approved; video-game quality on the roadmap |
+| 18 Oct | Tactical-shift cards state what was measured ("pressing harder", PPDA before and after), not a coach's intent |
 | 18 Oct | Agent-based tracking-first engine (ADR-0002); Event Hubs backbone (ADR-0003); Container Apps + Jobs (ADR-0004); keyless security (ADR-0005); uv monorepo (ADR-0006) |

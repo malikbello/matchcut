@@ -170,7 +170,11 @@ class _Engine:
         self.events: list[MatchEvent] = []
         self.truth: list[TruthRecord] = []
         self.seq = 0
-        self.tactic_change = (self.r.randint(0, 1), self.r.uniform(55, 70) * 60, False)
+        # the coach with room to press harder makes the switch (a side already pressing flat out cannot);
+        # the draw is kept so the random stream, and every match before the change, is unchanged
+        self.r.randint(0, 1)
+        presser = int(self.style[1]["press_intensity"] < self.style[0]["press_intensity"])
+        self.tactic_change = (presser, self.r.uniform(55, 70) * 60, False)
         # recording
         self.rec_t: list[int] = []
         self.rec_period: list[int] = []
@@ -382,7 +386,9 @@ class _Engine:
             dist = np.hypot(*(self.pos[defs] - self.pos[self.carrier]).T)
             order = defs[np.argsort(dist)]
             bx_def, _ = self.to_att(dteam, float(self.ball[0]), float(self.ball[1]))
-            n_press = 1 + (1 if press > 0.55 else 0) + (1 if press > 0.75 and bx_def < 45 else 0)
+            n_press = (
+                1 + (1 if press > 0.55 else 0) + (1 if press > 0.75 and bx_def > 52.5 else 0)
+            )  # high press hunts in their half
             for k, s in enumerate(order[:n_press]):
                 if np.hypot(*(self.pos[s] - self.pos[self.carrier])) < 22 + 10 * press:
                     lead = self.vel[self.carrier] * (0.5 + 0.3 * k)
@@ -434,7 +440,9 @@ class _Engine:
         if x > 76 and set_piece not in ("throw_in", "goal_kick", "kick_off", "corner"):
             xg = expected_goals(x, y, under_pressure=near < 2.5)
             # elite players shoot from range: about 4 in 10 shots come from outside the box
-            p_shoot = min(0.5, max(0.0, 0.05 + (xg - 0.02) * 1.0)) * (0.7 + 0.6 * self.shooting[c] / 99)
+            outside = x < 105 - 16.5 or abs(y - 34) > 20.16
+            base = 0.075 if outside else 0.03  # top-flight teams take ~4 in 10 shots from distance
+            p_shoot = min(0.5, max(0.0, base + (xg - 0.02) * 1.0)) * (0.7 + 0.6 * self.shooting[c] / 99)
             if self.r.random() < p_shoot:
                 self.shoot(c, x, y, xg, near < 2.5)
                 return
@@ -544,13 +552,19 @@ class _Engine:
         sx, sy = float(self.pos[c][0]), float(self.pos[c][1])
         gy = 34 + self.r.uniform(-3.4, 3.4)
         tx, ty = self.from_att(team, LENGTH, gy)
-        p_goal = min(0.95, xg * (1.0 + 0.007 * (self.shooting[c] - 65)))
+        # The true scoring probability is the xG of the chance, adjusted for the finisher.
+        # The goal is decided first; only misses are then shared between blocks, saves and
+        # off-target, so goals track xG in every zone of the pitch (as xG is defined).
+        p_goal = min(
+            0.95, xg * (1.0 + 0.008 * (self.shooting[c] - 62))
+        )  # centred on the league-average finisher
+        is_goal = self.r.random() < p_goal
         opp = self.opponents(team)
         lane = point_segment_distance(self.pos[opp][:, 0], self.pos[opp][:, 1], sx, sy, tx, ty)
         blockers = [
             int(o)
             for o, d_ in zip(opp, lane, strict=True)
-            if d_ < 1.1 and self.slot_role[o] != "GK" and np.hypot(*(self.pos[o] - (sx, sy))) < 12
+            if d_ < 1.4 and self.slot_role[o] != "GK" and np.hypot(*(self.pos[o] - (sx, sy))) < 12
         ]
         speed = self.r.uniform(19, 31)
         self.close_carry(c)
@@ -565,7 +579,7 @@ class _Engine:
             )
         )
         foot = BodyPart.LEFT_FOOT if self.slot_player[c].foot.value == "left" else BodyPart.RIGHT_FOOT
-        if blockers and self.r.random() < 0.55:
+        if not is_goal and blockers and self.r.random() < 0.48:
             b = blockers[0]
             bx_, by_ = float(self.pos[b][0]), float(self.pos[b][1])
             eid = self.emit(
@@ -584,8 +598,7 @@ class _Engine:
                 "shot", sx, sy, bx_, by_, self.t, 0.25, 0.0, team, False, b, eid, xg, c, "block"
             )
             return
-        r = self.r.random()
-        result = "goal" if r < p_goal else ("save" if r < p_goal + 0.36 else "off")
+        result = "goal" if is_goal else ("save" if self.r.random() < 0.42 else "off")
         if result == "off":
             ty = ty + (self.r.choice([-1, 1]) * self.r.uniform(4.2, 9))
         dur = math.hypot(tx - sx, ty - sy) / speed
@@ -806,8 +819,8 @@ class _Engine:
         if done or self.period != 2 or (self.t - self.p1_len + 45 * 60) < when:
             return
         st = self.style[team]
-        st["press_intensity"] = min(1.0, st["press_intensity"] + 0.28)
-        st["defensive_line"] = min(1.0, st["defensive_line"] + 0.2)
+        st["press_intensity"] = min(1.0, st["press_intensity"] + 0.35)
+        st["defensive_line"] = min(1.0, st["defensive_line"] + 0.35)
         st["tempo"] = min(1.0, st["tempo"] + 0.15)
         self.truth.append(
             TruthRecord(

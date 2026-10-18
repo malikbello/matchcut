@@ -23,6 +23,8 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - name: System libraries (video encoding, Skia)
+        run: sudo apt-get update -q && sudo apt-get install -y -q ffmpeg libegl1 libgl1 libfontconfig1
       - name: Install (locked)
         run: uv sync --locked
       - name: Format check

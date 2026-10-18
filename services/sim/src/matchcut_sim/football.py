@@ -1,4 +1,6 @@
-"""Football models shared by the engine and the realism report.
+"""Football models used by the engine's decision-making.
+
+Expected goals and shot geometry come from ``matchcut_analytics`` (one source of truth).
 
 All functions work in the *attacking frame*: the team in question attacks +x,
 its target goal is centred at (105, 34).
@@ -6,9 +8,8 @@ its target goal is centred at (105, 34).
 
 from __future__ import annotations
 
-import math
-
 import numpy as np
+from matchcut_analytics.geometry import expected_goals, shot_angle
 
 LENGTH, WIDTH = 105.0, 68.0
 GOAL_Y = WIDTH / 2
@@ -84,29 +85,6 @@ FORMATIONS: dict[str, list[tuple[str, float, float]]] = {
 }
 
 
-def shot_angle(x: float, y: float) -> float:
-    """Angle (radians) subtended by the goal mouth from (x, y)."""
-    dx = max(LENGTH - x, 0.05)
-    a = math.atan2(GOAL_Y + GOAL_HALF_WIDTH - y, dx)
-    b = math.atan2(GOAL_Y - GOAL_HALF_WIDTH - y, dx)
-    return abs(a - b)
-
-
-def expected_goals(x: float, y: float, header: bool = False, under_pressure: bool = False) -> float:
-    """Logistic xG from distance and goal-mouth angle, with header and pressure penalties.
-
-    Calibrated to public open-play shot benchmarks: ~0.40 from 6 m central,
-    ~0.15 from the penalty spot in open play, ~0.02-0.03 from 25 m central.
-    """
-    dist = math.hypot(LENGTH - x, GOAL_Y - y)
-    z = -1.10 - 0.12 * dist + 1.30 * shot_angle(x, y)
-    if header:
-        z -= 0.9
-    if under_pressure:
-        z -= 0.3
-    return 1.0 / (1.0 + math.exp(-z))
-
-
 def zone_value(x: np.ndarray | float, y: np.ndarray | float) -> np.ndarray | float:
     """Possession value of a location (probability-like, 0..~0.35).
 
@@ -128,3 +106,6 @@ def point_segment_distance(
         return np.hypot(px - ax, py - ay)
     t = np.clip(((px - ax) * abx + (py - ay) * aby) / denom, 0.0, 1.0)
     return np.hypot(px - (ax + t * abx), py - (ay + t * aby))
+
+
+__all__ = ["FORMATIONS", "expected_goals", "point_segment_distance", "shot_angle", "zone_value"]

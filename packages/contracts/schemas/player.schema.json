@@ -23,7 +23,7 @@
       "type": "string"
     }
   },
-  "$id": "https://matchcut.dev/schemas/1.0.0/player.schema.json",
+  "$id": "https://matchcut.dev/schemas/1.1.0/player.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -34,6 +34,7 @@
       "type": "integer"
     },
     "club_id": {
+      "description": "Current club, or 'retired'",
       "title": "Club Id",
       "type": "string"
     },
@@ -80,8 +81,8 @@
       "type": "integer"
     },
     "player_id": {
-      "description": "<club_id>-<shirt number>",
-      "pattern": "^[a-z]{3}-\\d{2}$",
+      "description": "Permanent ID that survives transfers, e.g. p00042",
+      "pattern": "^p\\d{5}$",
       "title": "Player Id",
       "type": "string"
     },
