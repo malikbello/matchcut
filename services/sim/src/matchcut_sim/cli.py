@@ -12,10 +12,13 @@ import io
 import json
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from matchcut_analytics import MatchState, MomentDetector, XTModel, score_tactical_detection, train
+from matchcut_contracts import Moment
 
 from matchcut_sim.engine import MatchResult, simulate_match
 from matchcut_sim.league import build_league
@@ -112,21 +115,30 @@ def cmd_realism(args: argparse.Namespace) -> None:
     print(f"{sum(ok.values())}/{len(ok)} metrics in range")
 
 
-def replay_analytics(m: MatchResult):
-    """Feed a simulated match through the live analytics in timeline order, as the cloud lane will."""
+def replay_analytics(m: MatchResult, on_moment: Callable[[Moment, dict[str, Any]], None] | None = None):
+    """Feed a simulated match through the live analytics in timeline order, as the cloud lane will.
+
+    ``on_moment`` receives each moment as it is detected, with the match snapshot at that instant.
+    """
     det = MomentDetector(MatchState(m.meta, XTModel.load_default()))
+
+    def emit(new: list[Moment]) -> None:
+        if on_moment is not None:
+            for mo in new:
+                on_moment(mo, det.state.snapshot())
+
     events = iter(m.events)
     nxt = next(events, None)
     for i, t in enumerate(m.t_ms):
         while nxt is not None and nxt.t_ms <= t:
-            det.on_event(nxt)
+            emit(det.on_event(nxt))
             nxt = next(events, None)
         ids = [m.player_ids[r] if r >= 0 else None for r in m.roster[i]]
         period = int(m.period[i])
         home_right = period == 1
         att = {m.meta.home_club_id: home_right, m.meta.away_club_id: not home_right}
         clock = f"{int(t // 60000)}:{int(t // 1000) % 60:02d}"
-        det.on_tracking(
+        new = det.on_tracking(
             int(t),
             clock,
             ids,
@@ -136,8 +148,9 @@ def replay_analytics(m: MatchResult):
             att,
             ball_x=float(m.ball[i, 0]),
         )
+        emit(new)
     while nxt is not None:
-        det.on_event(nxt)
+        emit(det.on_event(nxt))
         nxt = next(events, None)
     return det
 

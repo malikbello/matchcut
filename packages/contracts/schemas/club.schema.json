@@ -85,7 +85,7 @@
       "type": "object"
     }
   },
-  "$id": "https://matchcut.dev/schemas/1.1.0/club.schema.json",
+  "$id": "https://matchcut.dev/schemas/1.2.0/club.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
