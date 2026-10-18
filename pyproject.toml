@@ -27,7 +27,7 @@ dev = [
   "matchcut-sim",
   "matchcut-memory",
   "matchcut-renderer",
-  "matchcut-insights[evals]",
+  "matchcut-insights",
   "matchcut-api",
   "httpx>=0.28",
   "common-data-format-validator>=0.1.1",
