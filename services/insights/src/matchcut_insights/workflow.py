@@ -1,27 +1,27 @@
-"""The insights flow as a Microsoft Agent Framework workflow graph.
+"""The decision stage as a Microsoft Agent Framework workflow graph.
 
-    moment ──► Analyst ─┐
-           └─► Historian ┴─► Writer ──► Verifier ──► Localiser ──► output
-                              ▲            │ (one revision with feedback)
-                              └────────────┘
-                                         └──► output (rejected: the plain card stays)
+    moment -> Analyst  -+
+           -> Historian -+-> Writer -> Verifier -> output (verified, or rejected: plain card stays)
+                              ^            |
+                              +------------+  one revision with the Verifier's feedback
 
 Executors are typed; the framework runs Analyst and Historian in parallel, joins
-them, and routes the Verifier's decision along conditional edges. Running on the
-framework also gives OpenTelemetry spans for every executor and model call.
+them, and routes the Verifier's decision along conditional edges. Localisation is
+a separate stage (``pipeline.py``): the verified English line is kept first and
+translations follow, so a slow language never costs the English line. Running on
+the framework also gives OpenTelemetry spans for every executor and model call.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Never
 
 from agent_framework import Executor, Workflow, WorkflowBuilder, WorkflowContext, handler
 from matchcut_contracts import Fact, Moment
 
 from matchcut_insights.brain import AnalystNote, Brain, HistoryNote, Line, Translation
 from matchcut_insights.facts import MatchContext, history_facts, tool_results_by_query
-from matchcut_insights.verify import Verdict, verify_line, verify_translation
+from matchcut_insights.verify import Verdict, verify_line
 
 MAX_DRAFTS = 2
 
@@ -62,12 +62,6 @@ class Draft:
 class Revision:
     draft: Draft
     feedback: str
-
-
-@dataclass
-class Approved:
-    draft: Draft
-    verdict: Verdict
 
 
 @dataclass
@@ -159,11 +153,11 @@ class VerifierStep(Executor):
         self.names = match.names()
 
     @handler
-    async def check(self, draft: Draft, ctx: WorkflowContext[Revision | Approved, Outcome]) -> None:
+    async def check(self, draft: Draft, ctx: WorkflowContext[Revision, Outcome]) -> None:
         line = draft.line
         verdict = verify_line(line.text, line.cited_fact_ids, draft.facts, self.names, line.number_refs())
         if verdict.passed:
-            await ctx.send_message(Approved(draft, verdict))
+            await ctx.yield_output(Outcome(draft, verdict))
             return
         draft.problems += verdict.problems
         if draft.attempt < MAX_DRAFTS:
@@ -172,28 +166,13 @@ class VerifierStep(Executor):
             await ctx.yield_output(Outcome(draft, verdict))
 
 
-class LocaliserStep(Executor):
-    def __init__(self, brain: Brain, match: MatchContext, languages: list[str]):
-        super().__init__(id="localiser")
-        self.brain, self.languages, self.names = brain, languages, match.names()
-
-    @handler
-    async def localise(self, ok: Approved, ctx: WorkflowContext[Never, Outcome]) -> None:
-        checked: list[tuple[Translation, Verdict]] = []
-        if self.languages:
-            for tr in await self.brain.translate(ok.draft.line.text, self.languages):
-                checked.append((tr, verify_translation(ok.draft.line.text, tr.text, self.names)))
-        await ctx.yield_output(Outcome(ok.draft, ok.verdict, checked))
-
-
 # ---------------------------------------------------------------- graph
 
 
-def build_workflow(brain: Brain, match: MatchContext, languages: list[str], job: MomentJob) -> Workflow:
+def build_workflow(brain: Brain, match: MatchContext, job: MomentJob) -> Workflow:
     dispatch = Dispatch(id="dispatch")
     analyst, historian = AnalystStep(brain), HistorianStep(brain, match)
     writer, verifier = WriterStep(brain), VerifierStep(match)
-    localiser = LocaliserStep(brain, match, languages)
     writer.bind(job)
     return (
         WorkflowBuilder(start_executor=dispatch, name="matchcut-insights", max_iterations=20)
@@ -201,6 +180,5 @@ def build_workflow(brain: Brain, match: MatchContext, languages: list[str], job:
         .add_fan_in_edges([analyst, historian], writer)
         .add_edge(writer, verifier)
         .add_edge(verifier, writer, condition=lambda m: isinstance(m, Revision))
-        .add_edge(verifier, localiser, condition=lambda m: isinstance(m, Approved))
         .build()
     )

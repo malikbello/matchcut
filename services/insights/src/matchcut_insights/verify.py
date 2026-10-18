@@ -45,8 +45,12 @@ def _number_forms(value: float | int | str) -> set[str]:
     return forms
 
 
+# Arabic-Indic and Persian digits, and the Arabic decimal separator, read as Western digits
+_DIGITS = {**{0x0660 + i: str(i) for i in range(10)}, **{0x06F0 + i: str(i) for i in range(10)}, 0x066B: "."}
+
+
 def numbers_in(text: str) -> list[str]:
-    return [n.replace(",", ".") for n in NUMBER.findall(text)]
+    return [n.replace(",", ".") for n in NUMBER.findall(text.translate(_DIGITS))]
 
 
 def _names_in(text: str, names: Iterable[str]) -> set[str]:

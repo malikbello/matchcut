@@ -80,11 +80,24 @@
       "type": "string"
     }
   },
-  "$id": "https://matchcut.dev/schemas/1.2.0/cue.schema.json",
+  "$id": "https://matchcut.dev/schemas/1.3.0/cue.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "description": "A timed on-screen line for one moment, in one language.",
   "properties": {
+    "audio": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Spoken version of the line, path relative to the media root",
+      "title": "Audio"
+    },
     "checks": {
       "additionalProperties": {
         "type": "boolean"
@@ -105,7 +118,7 @@
       "type": "string"
     },
     "cue_id": {
-      "pattern": "^CU-\\d{5}-[a-z]{2}$",
+      "pattern": "^CU-\\d{5}-[a-z]{2,3}(-[A-Z]{2})?$",
       "title": "Cue Id",
       "type": "string"
     },
@@ -121,7 +134,8 @@
       "$ref": "#/$defs/MomentKind"
     },
     "language": {
-      "pattern": "^[a-z]{2}$",
+      "description": "BCP 47 tag: en, en-NG (Nigerian English), pcm (Nigerian Pidgin), yo, ha, ig, ar, ...",
+      "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$",
       "title": "Language",
       "type": "string"
     },
@@ -149,7 +163,7 @@
       "type": "string"
     },
     "schema_version": {
-      "default": "1.2.0",
+      "default": "1.3.0",
       "title": "Schema Version",
       "type": "string"
     },
@@ -165,6 +179,19 @@
       "maxLength": 280,
       "title": "Text",
       "type": "string"
+    },
+    "voice": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Voice that spoke it, e.g. azure:en-NG-AbeoNeural",
+      "title": "Voice"
     }
   },
   "required": [

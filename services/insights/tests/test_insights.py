@@ -404,3 +404,28 @@ def test_momentum_swings_keep_their_plain_card(match):
     cues, report = asyncio.run(InsightsPipeline(ScriptedBrain([_good_line(match)]), ctx).process(swing, snap))
     assert not report.ai_attempted
     assert [c.status for c in cues] == [CueStatus.PLAIN]
+
+
+def test_a_slow_translation_never_costs_the_verified_english_line(match):
+    class SlowLocaliser(ScriptedBrain):
+        async def translate(self, text, languages):
+            await asyncio.sleep(5)
+            return []
+
+    ctx, _ = match
+    mo, snap = _goal(match)
+    pipe = InsightsPipeline(
+        SlowLocaliser([_good_line(match)]), ctx, languages=("es",), translate_timeout_s=0.2
+    )
+    cues, report = asyncio.run(pipe.process(mo, snap))
+    assert [(c.language, c.status) for c in cues] == [("en", CueStatus.PLAIN), ("en", CueStatus.VERIFIED)]
+    assert report.verified
+    assert "translations timed out" in (report.error or "")
+
+
+def test_numbers_written_as_text_still_ground():
+    facts, rejected = history_facts([("career goals before", "49", QID)], tool_results_by_query([ANSWER]))
+    assert [f.value for f in facts] == ["49"]
+    assert not rejected
+    _, rejected = history_facts([("career goals before", "48", QID)], tool_results_by_query([ANSWER]))
+    assert rejected

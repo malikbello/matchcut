@@ -22,6 +22,7 @@ from matchcut_contracts import Fact, Moment
 from pydantic import BaseModel, Field
 
 from matchcut_insights.facts import MatchContext
+from matchcut_insights.languages import LANGUAGES
 
 # ---------------------------------------------------------------- typed outputs
 
@@ -62,7 +63,7 @@ class Line(BaseModel):
 
 
 class Translation(BaseModel):
-    language: str = Field(description="ISO 639-1 code, e.g. 'es'")
+    language: str = Field(description="The language tag exactly as requested, e.g. 'en-NG', 'pcm', 'yo'")
     text: str
 
 
@@ -111,10 +112,14 @@ speed, a run of form) over many, and over abstract indices such as momentum. Use
 shirt number only when it adds something. If
 feedback from the Verifier is given, fix exactly those problems."""
 
-LOCALISER = """You are the Localiser. Translate the broadcast line into each requested language for
-on-screen graphics, natural to football fans in that language. Keep every number and
-every proper name exactly as written. Do not add or remove information. Never use
-em dashes."""
+LOCALISER = """You are the Localiser. Write the broadcast line in each requested language for
+on-screen graphics and spoken commentary, natural to football fans who speak it. Follow
+the style given for each language. Rules checked by code:
+- keep every number exactly as written, in Western digits (0-9), in every language;
+- keep every player and club name exactly as written, in Latin script, in every language;
+- do not add or remove information;
+- never use em dashes.
+Return each item with the exact language tag you were given."""
 
 
 def _facts_block(facts: Sequence[Fact]) -> str:
@@ -217,5 +222,10 @@ class AgentBrain:
         return r.value
 
     async def translate(self, text: str, languages: Sequence[str]) -> list[Translation]:
-        r = await self._run(self.localiser, f"Languages: {', '.join(languages)}\nLine: {text}", Translations)
+        wanted = "\n".join(
+            f"- {tag}: {LANGUAGES[tag].name}. Style: {LANGUAGES[tag].style}"
+            for tag in languages
+            if tag in LANGUAGES
+        )
+        r = await self._run(self.localiser, f"Languages:\n{wanted}\nLine: {text}", Translations)
         return r.value.items

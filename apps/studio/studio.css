@@ -34,6 +34,9 @@ body { background: radial-gradient(1200px 600px at 70% -10%, #13202B 0%, var(--i
 .chip.live { background: var(--signal); color: var(--ink-950); }
 .chip.live .dot, .clock .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: pulse 1.2s infinite; }
 .chip.synthetic { border: 1px solid var(--ink-600); color: var(--mist); }
+.sound { display: inline-flex; align-items: center; gap: 8px; background: var(--ink-800); color: var(--chalk); border: 1px solid var(--ink-700); border-radius: var(--r-chip); padding: 7px 12px; font: 600 13px var(--ui); cursor: pointer; }
+.sound[aria-pressed="false"] { color: var(--mist); }
+.sound.speaking .icon { color: var(--verified); }
 .select select { background: var(--ink-800); color: var(--chalk); border: 1px solid var(--ink-700); border-radius: var(--r-chip); padding: 7px 10px; font: 500 14px var(--ui); }
 @keyframes pulse { 50% { opacity: 0.3; } }
 
@@ -121,6 +124,14 @@ button.primary:hover { transform: translateY(-1px); }
 .timeline .icon { color: var(--mist); margin-top: 1px; }
 .timeline .goal .icon { color: var(--signal); }
 .timeline .x { font-size: 14px; line-height: 1.4; }
+
+/* Arabic: its own typeface, and the card reads right to left (the pitch never mirrors) */
+:lang(ar) { font-family: 'IBM Plex Sans Arabic', var(--ui); }
+.cue-text:lang(ar) { font: 700 clamp(18px, 2vw, 26px)/1.5 'IBM Plex Sans Arabic', var(--ui); letter-spacing: 0; }
+.timeline .x:lang(ar) { font: 500 14px/1.5 'IBM Plex Sans Arabic', var(--ui); direction: rtl; text-align: right; }
+.cue[dir="rtl"] { grid-template-columns: 1fr auto; }
+.cue[dir="rtl"] .hero { order: 2; }
+.cue[dir="rtl"] .cue-body { padding: 14px 18px 14px 20px; }
 
 @media (max-width: 1000px) {
   .studio { grid-template-columns: 1fr; padding: 12px; }
