@@ -68,6 +68,29 @@ jobs:
           path: realism-smoke.md
           retention-days: 7
 
+  studio:
+    name: Studio 3D bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: apps/studio
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+      - name: Install (locked)
+        run: npm ci --no-fund
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=moderate
+      - name: Bundle the show camera
+        run: npm run build
+      - name: Bundle is present and within budget (1 MB)
+        run: test "$(stat -c %s dist/show3d.js)" -lt 1048576
+
   dependency-audit:
     name: Dependency audit
     runs-on: ubuntu-24.04

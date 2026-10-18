@@ -43,8 +43,10 @@ LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")  # BCP 47: en, en-NG, pcm, ar, yo
 AUDIO_NAME = re.compile(r"^CU-\d{5}-[a-z]{2,3}(-[A-Z]{2})?\.mp3$")
 COOKIE = "mc_session"
 SESSION_TTL_S = 12 * 3600
+# 'wasm-unsafe-eval' lets the 3D show camera compile its meshopt WebAssembly decoder; it does not
+# allow string evaluation of JavaScript
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; "
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; font-src 'self'; "
     "img-src 'self' data:; media-src 'self' blob:; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 )

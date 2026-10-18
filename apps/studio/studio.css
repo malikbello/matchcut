@@ -58,6 +58,12 @@ button.primary:hover { transform: translateY(-1px); }
 .stage { display: grid; gap: 12px; align-content: start; min-width: 0; }
 .screen { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-panel); overflow: hidden; background: var(--turf-900); border: 1px solid var(--ink-700); box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8); }
 .screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.screen canvas[hidden] { display: none; }
+.show-loading { position: absolute; inset: auto auto 18px 18px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--r-chip); background: rgba(7, 9, 13, 0.8); color: var(--mist); font: 600 12px var(--ui); letter-spacing: 0.04em; }
+.show-loading .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--floodlight); animation: pulse 1.2s ease-in-out infinite; }
+.segmented { display: inline-flex; border: 1px solid var(--ink-700); border-radius: var(--r-chip); overflow: hidden; }
+.segmented button { background: var(--ink-800); color: var(--mist); border: 0; padding: 7px 12px; font: 700 13px var(--ui); cursor: pointer; }
+.segmented button[aria-pressed="true"] { background: var(--chalk); color: var(--ink-950); }
 
 /* score bug: typography first; score and clock are sacred */
 .scorebug { position: absolute; top: 18px; left: 18px; display: grid; grid-template-columns: auto auto auto auto; align-items: stretch; background: rgba(7, 9, 13, 0.9); border-radius: 8px; overflow: hidden; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); }

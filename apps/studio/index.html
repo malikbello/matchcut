@@ -70,6 +70,8 @@
     <section class="stage" aria-label="Match">
       <div class="screen">
         <canvas id="pitch" aria-label="Live positions of all 22 players and the ball" role="img"></canvas>
+        <canvas id="show" class="show" aria-label="3D broadcast view of the match" role="img" hidden></canvas>
+        <div id="show-loading" class="show-loading" hidden><span class="dot" aria-hidden="true"></span>Building the stadium</div>
 
         <div class="scorebug" id="scorebug">
           <div class="team home"><span class="kit" id="home-kit"></span><span class="code" id="home-code">HOM</span></div>
@@ -102,6 +104,17 @@
           <div class="track"><div class="progress" id="progress"></div></div>
           <div class="markers" id="markers"></div>
         </div>
+        <div class="segmented" role="group" aria-label="View">
+          <button type="button" id="view-3d" aria-pressed="true">3D</button>
+          <button type="button" id="view-2d" aria-pressed="false">2D</button>
+        </div>
+        <label class="select" id="cam-wrap"><span class="sr-only">Camera</span>
+          <select id="cam">
+            <option value="broadcast" selected>Main camera</option>
+            <option value="tactical">Tactical</option>
+            <option value="goal">Behind goal</option>
+          </select>
+        </label>
         <label class="select"><span class="sr-only">Speed</span>
           <select id="speed">
             <option value="1">1×</option><option value="5">5×</option><option value="15" selected>15×</option><option value="40">40×</option>
