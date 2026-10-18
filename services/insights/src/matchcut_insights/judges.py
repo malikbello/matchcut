@@ -32,7 +32,7 @@ def _context(cue: Cue) -> str:
 
 
 def judge_lines(cues: Sequence[Cue]) -> JudgeScores:
-    from azure.ai.evaluation import (  # noqa: PLC0415 - optional 'evals' extra
+    from azure.ai.evaluation import (  # noqa: PLC0415  # pyright: ignore[reportMissingImports] - optional "evals" extra
         AzureOpenAIModelConfiguration,
         GroundednessEvaluator,
         RelevanceEvaluator,
