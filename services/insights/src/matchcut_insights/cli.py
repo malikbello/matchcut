@@ -25,6 +25,8 @@ from matchcut_sim.cli import replay_analytics
 from matchcut_insights.brain import AgentBrain, Brain
 from matchcut_insights.facts import MatchContext
 from matchcut_insights.pipeline import InsightsPipeline, MomentReport
+from matchcut_insights.redteam import red_team, report_markdown
+from matchcut_insights.telemetry import configure_telemetry
 
 # list price per 1M tokens for gpt-5-mini Global Standard, USD (input, output); for the cost estimate
 PRICE_PER_M = (0.25, 2.00)
@@ -108,6 +110,7 @@ async def cmd_eval(args: argparse.Namespace) -> None:
     reports: list[MomentReport] = []
     usage: list[dict[str, Any]] = []
     samples: list[Cue] = []
+    all_verified: list[Cue] = []
     async with _brain(args) as brain:
         for i in range(args.matches):
             ctx, moments = moments_with_snapshots(ids[(5 * i) % 20], ids[(5 * i + 7) % 20], 500 + i)
@@ -115,7 +118,9 @@ async def cmd_eval(args: argparse.Namespace) -> None:
                 brain, ctx, _top(moments, args.max_moments), args.languages.split(",")
             )
             reports += reps
-            samples += [c for c in cues if c.status == CueStatus.VERIFIED and c.language == "en"][:4]
+            en = [c for c in cues if c.status == CueStatus.VERIFIED and c.language == "en"]
+            samples += en[:4]
+            all_verified += en
             print(
                 f"match {i + 1}/{args.matches}: "
                 f"{sum(r.verified for r in reps)}/{sum(r.ai_attempted for r in reps)} verified",
@@ -152,6 +157,20 @@ async def cmd_eval(args: argparse.Namespace) -> None:
         ("Tokens per moment (in / out)", f"{tok_in // n} / {tok_out // n}"),
         ("Estimated model cost per moment", f"${cost / n:.5f}"),
     ]
+    if args.judges:
+        from matchcut_insights.judges import judge_lines  # noqa: PLC0415 - optional 'evals' extra
+
+        j = judge_lines(all_verified)
+        rows += [
+            (
+                "Azure AI Evaluation groundedness (1 to 5), mean / pass rate",
+                f"{j.groundedness_mean:.2f} / {j.groundedness_pass:.0%} of {j.lines}",
+            ),
+            (
+                "Azure AI Evaluation relevance (1 to 5), mean / pass rate",
+                f"{j.relevance_mean:.2f} / {j.relevance_pass:.0%} of {j.lines}",
+            ),
+        ]
     problems: dict[str, int] = {}
     for r in ai:
         for p in r.problems:
@@ -173,7 +192,7 @@ async def cmd_eval(args: argparse.Namespace) -> None:
         "",
         "## Sample verified lines",
         "",
-        *[f"- `{c.clock}` {c.text} — cites {', '.join(c.cited_fact_ids)}" for c in samples[:8]],
+        *[f"- `{c.clock}` {c.text} (cites {', '.join(c.cited_fact_ids)})" for c in samples[:8]],
         "",
     ]
     out = Path(args.out)
@@ -181,6 +200,29 @@ async def cmd_eval(args: argparse.Namespace) -> None:
     out.write_text("\n".join(md), encoding="utf-8")
     print("\n".join(md))
     print(f"-> {out}")
+
+
+def cmd_redteam(args: argparse.Namespace) -> None:
+    league = build_league()
+    ids = [c.club_id for c in league.clubs]
+    total = None
+    for i in range(args.matches):
+        ctx, moments = moments_with_snapshots(ids[(5 * i) % 20], ids[(5 * i + 7) % 20], 500 + i)
+        r = red_team(moments, ctx, seed=i)
+        if total is None:
+            total = r
+        else:
+            total.true_lines += r.true_lines
+            total.false_rejections += r.false_rejections
+            total.attacks += r.attacks
+            total.caught += r.caught
+            total.misses += r.misses
+    assert total is not None
+    md = report_markdown(total, args.matches)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(md, encoding="utf-8")
+    print(md)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -203,7 +245,15 @@ def main(argv: list[str] | None = None) -> None:
     e.add_argument("--memory-db", default="data/league/memory.sqlite")
     e.add_argument("--languages", default="es,fr")
     e.add_argument("--out", default="reports/insights-eval.md")
+    e.add_argument("--judges", action="store_true", help="add Azure AI Evaluation groundedness and relevance")
+    t = sub.add_parser("redteam", help="plant false claims and measure what the Verifier catches (offline)")
+    t.add_argument("--matches", type=int, default=4)
+    t.add_argument("--out", default="reports/verifier-redteam.md")
     args = p.parse_args(argv)
+    if args.cmd == "redteam":
+        cmd_redteam(args)
+        return
+    configure_telemetry("matchcut-insights")
     asyncio.run(cmd_run(args) if args.cmd == "run" else cmd_eval(args))
 
 

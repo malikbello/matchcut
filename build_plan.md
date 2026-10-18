@@ -34,13 +34,14 @@
 | D1 | Sun 18 | Private repo `matchcut`, branch protection, CI skeleton, ADRs 001–005, contracts (JSON Schema), design tokens · league + history generator · match engine v0 (events + tracking) [tests green; realism report v0] |
 | D2 | Mon 19 | Match engine v1 (tactics, hidden truth) · state engine metrics (xG, xT, PPDA, momentum, control vs chaos) · moment detector · renderer v0 (broadcast camera → MP4/HLS) · League Memory SQL + MCP server [one full match renders] |
 | D3 | Tue 20 | Live agents on Foundry with Agent Framework (Analyst ‖ Historian → Writer → Verifier → Localiser) · eval suite v1 · api (SSE) · Studio screen v0 with HLS + synced overlays [**vertical slice live locally**] |
+| D3.2 | Sun 18 to Mon 19 | **Voices and languages (approved 18 Oct):** live voiced commentary of verified lines with Azure Speech (standard British English and Nigerian English `en-NG`, Arabic); captions in English, Nigerian English, Spanish, French, Portuguese, Arabic, Yoruba, Hausa, Igbo and Nigerian Pidgin; language tags (BCP 47, e.g. `pcm`), digit normalisation in the Verifier, Latin-script names everywhere, right-to-left Studio, fonts for tone marks and Arabic; licence and native listening checks for a Yoruba/Hausa/Igbo/Pidgin voice model (voice only if both pass) |
 | D4 | Wed 21 | **Show camera (approved 18 Oct):** real-time 3D (Three.js/WebGL): stadium, crowd, floodlights, shadows, animated CC0 rigged players driven by tracking, replay cameras, post-processing; brand graphics layer · Vision lane v0 on the data camera (auto-labelled detector, tracking, pass/speed inference, scored vs truth) [show camera plays a live match in the browser] |
 | D5 | Thu 22 | Recap lane: Editor, Director, Scriptwriter + timing loop, Voice (Azure Speech), film timeline; films play in the show camera (16:9 and 9:16) with MP4 export; QA job · Package player [**one fan film end to end**] · re-read rules |
 | D6 | Fri 23 | Azure: Bicep/azd for everything, managed identity + RBAC, local auth off, Event Hubs, Container Apps + Jobs, SQL, Storage, SWA, App Insights · CI/CD with OIDC · smoke tests [**live URL**] |
-| D7 | Sat 24 | Recap Factory + Analyst screens · 9:16 shareables · right to left + 5 languages · motion polish · security hardening · dashboards · docs [UX review against the brand board] |
+| D7 | Sat 24 | Recap Factory + Analyst screens · 9:16 shareables · native-speaker review of the Nigerian languages and Arabic · motion polish · security hardening · dashboards · docs [UX review against the brand board] |
 | D8 | Sun 25 | Curated demo match (storylines) · record and edit the video (Arcas narration, no music) · pitch text · README · judge guide [video < 2:00 confirmed by ffprobe] |
 | D9 | Mon 26 | Clean-clone test · final QA on the live URL · make the repo public · Malik submits by hand · re-read rules [**submitted**] |
-| — | Tue 27 | Buffer only |
+| Buffer | Tue 27 | Buffer only |
 
 ## 4. Cut list (in order, only if behind)
 1. A2A partner agent (stretch, not planned)
