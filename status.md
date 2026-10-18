@@ -17,7 +17,8 @@
 
 ## Resume here (handoff, 18 Oct)
 - D3.2 merged (#7, 46ceb23). Work continues on branch `d4/show-camera`.
-- Waiting: YarnGPT2 trial for Yoruba, Hausa and Igbo voices (needs about 3 GB free memory); native review of Yoruba, Hausa, Igbo, Pidgin and Arabic lines.
+- Voices chosen 18 Oct: English Harry and French Marc (MAI-Voice-2.1, with mood). Yoruba, Hausa and Igbo voices deferred to a later release after the YarnGPT2 trial (too fast to follow); they stay captions-only (ADR-0012).
+- Open: native review of Yoruba (Malik), Hausa, Igbo, Pidgin and Arabic captions; the Localiser leaves football terms such as "press" in English, so it needs a per-language glossary.
 - Next: D4 (3D show camera with quality tiers + vision lane). First steps: Poly Haven CC0 textures; Blender retarget pipeline (Mixamo private, Quaternius CC0, CMU) onto one rig; Three.js scene.
 - Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 and CMU soccer mocap in `assets-cc0/`. Blender installed.
 
