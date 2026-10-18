@@ -295,6 +295,34 @@ export async function createShow({
         event: eventNear(events[slot], t), snap: snapAll || cutNow || matchDt === 0 || tr.jump,
       });
     }
+    attachBall();
+  }
+
+  // Ball attachment, as sports games do it: the tracked ball is a point, the animated feet are
+  // not, so a ball under control is drawn at the controller's feet in the way he faces (in the
+  // gloves after a catch), blended by distance so possession changes never jump.
+  const spot = new THREE.Vector3();
+  function attachBall() {
+    let owner = null;
+    let best = 1.3;
+    for (const pl of players) {
+      if (!pl.root.visible) continue;
+      const near = Math.hypot(pl.root.position.x - ball.position.x, pl.root.position.z - ball.position.z);
+      if (pl.catching && near < 1.5) {
+        // a save the keeper holds: the ball stays with him (a parry leaves, so the rule lets go)
+        owner = pl;
+        best = 0;
+        break;
+      }
+      const d = Math.hypot(pl.root.position.x - ball.position.x, pl.root.position.z - ball.position.z);
+      if (d < best && ball.position.y < 0.6) {
+        best = d;
+        owner = pl;
+      }
+    }
+    if (!owner) return;
+    const w = owner.catching ? 1 : THREE.MathUtils.clamp((1.3 - best) / 0.6, 0, 1);
+    ball.position.lerp(owner.ballSpot(spot), w); // spin still follows the tracked path (see placeBall)
   }
 
   function finish(wallDt, excitement, focus) {
