@@ -9,7 +9,7 @@ readme = "README.md"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/contracts", "packages/analytics", "services/sim", "services/league-memory", "services/renderer"]
+members = ["packages/contracts", "packages/analytics", "services/sim", "services/league-memory", "services/renderer", "services/insights", "services/api"]
 
 [tool.uv.sources]
 matchcut-contracts = { workspace = true }
@@ -17,6 +17,8 @@ matchcut-analytics = { workspace = true }
 matchcut-sim = { workspace = true }
 matchcut-memory = { workspace = true }
 matchcut-renderer = { workspace = true }
+matchcut-insights = { workspace = true }
+matchcut-api = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -25,6 +27,9 @@ dev = [
   "matchcut-sim",
   "matchcut-memory",
   "matchcut-renderer",
+  "matchcut-insights",
+  "matchcut-api",
+  "httpx>=0.28",
   "pytest>=8.3",
   "pytest-cov>=6.0",
   "hypothesis>=6.120",
@@ -52,6 +57,8 @@ ignore = [
 "services/sim/src/matchcut_sim/league.py" = ["E501"]                # club data table, one club per line
 "packages/analytics/src/matchcut_analytics/state.py" = ["PLR0912", "PLR0915"]    # one branch per event type
 "packages/analytics/src/matchcut_analytics/moments.py" = ["PLR0912"]               # one branch per event type
+"services/insights/src/matchcut_insights/plain.py" = ["PLR0912"]                    # one template per moment kind
+"services/api/src/matchcut_api/app.py" = ["PLR0915"]                                # app factory: routes close over settings
 "docs/**" = ["E501", "E741"]                                          # diagram generator: drawing coordinates
 
 [tool.pyright]
@@ -65,7 +72,7 @@ testpaths = ["packages", "services"]
 addopts = "-q --strict-markers"
 
 [tool.coverage.run]
-source = ["matchcut_contracts", "matchcut_analytics", "matchcut_sim", "matchcut_memory", "matchcut_renderer"]
+source = ["matchcut_contracts", "matchcut_analytics", "matchcut_sim", "matchcut_memory", "matchcut_renderer", "matchcut_insights", "matchcut_api"]
 branch = true
 
 [tool.coverage.report]

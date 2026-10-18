@@ -20,7 +20,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-SCHEMA_VERSION = "1.1.0"
+SCHEMA_VERSION = "1.2.0"
 PITCH_LENGTH_M = 105.0
 PITCH_WIDTH_M = 68.0
 
@@ -261,3 +261,46 @@ class Moment(_Contract):
     metrics: dict[str, float | int | str] = Field(
         default_factory=dict, description="Code-computed numbers agents may cite, at the precision given"
     )
+
+
+# ---------------------------------------------------------------- insights
+
+
+class Fact(_Contract):
+    """One citable fact, computed by code. Agents may only state what a fact says."""
+
+    fact_id: str = Field(
+        pattern=r"^(F-\d{3}|LM-[0-9a-f]{10}\.\d{1,2})$",
+        description="F-nnn from analytics; LM-<query id>.<n> from a League Memory answer",
+    )
+    label: str = Field(description="What the value means, e.g. 'expected goals of the shot'")
+    value: float | int | str
+    source: Literal["analytics", "league_memory"]
+    evidence_ids: list[str] = Field(
+        default_factory=list, description="Event, moment or history record IDs behind it"
+    )
+
+
+class CueStatus(StrEnum):
+    PLAIN = "plain"  # template card, airs instantly
+    VERIFIED = "verified"  # AI line that passed every check
+    REJECTED = "rejected"  # AI line failed verification; the plain card stays on air
+
+
+class Cue(_Contract):
+    """A timed on-screen line for one moment, in one language."""
+
+    schema_version: str = SCHEMA_VERSION
+    match_id: str
+    cue_id: str = Field(pattern=r"^CU-\d{5}-[a-z]{2}$")
+    moment_id: str = Field(pattern=r"^MO-\d{5}$")
+    kind: MomentKind
+    t_ms: int = Field(ge=0)
+    clock: str
+    language: str = Field(pattern=r"^[a-z]{2}$")
+    status: CueStatus
+    text: str = Field(max_length=280)
+    cited_fact_ids: list[str] = Field(default_factory=list)
+    facts: list[Fact] = Field(default_factory=list, description="The facts the line may draw on")
+    checks: dict[str, bool] = Field(default_factory=dict, description="Verifier results, one entry per check")
+    latency_ms: int | None = Field(default=None, ge=0, description="Moment detected to cue ready")

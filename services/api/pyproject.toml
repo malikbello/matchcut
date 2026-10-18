@@ -1,0 +1,16 @@
+[project]
+name = "matchcut-api"
+version = "0.1.0"
+description = "Matchcut API: access sessions, cue streams over Server-Sent Events, and the Studio screen."
+requires-python = ">=3.12"
+dependencies = ["matchcut-contracts", "fastapi>=0.120", "uvicorn>=0.40"]
+
+[project.scripts]
+matchcut-api = "matchcut_api.app:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/matchcut_api"]
