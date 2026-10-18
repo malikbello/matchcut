@@ -17,13 +17,25 @@ const HERO = {
   tactical_shift: [["opponent passes per defensive action, last", "PPDA now"]],
   momentum_swing: [["momentum", "momentum"]],
 };
+const RTL = new Set(["ar"]);
 const CUE_SECONDS = 7; // on screen for 7 s of wall time at any replay speed
 const PITCH = { L: 105, W: 68 };
 
 const state = {
   match: null, feed: null, cues: [], moments: [], t: 0, end: 5400000, playing: true, speed: 15,
   shown: null, shownAt: 0, lastFrame: performance.now(), trail: [], dpr: 1,
+  sound: true, audio: new Audio(),
 };
+state.audio.addEventListener("playing", () => $("sound").classList.add("speaking"));
+state.audio.addEventListener("ended", () => $("sound").classList.remove("speaking"));
+
+function speak(cue) {
+  state.audio.pause();
+  $("sound").classList.remove("speaking");
+  if (!state.sound || !cue.audio) return;
+  state.audio.src = `/media/${cue.audio}`;
+  state.audio.play().catch(() => {}); // a browser may still block sound until the next click
+}
 
 function el(tag, attrs = {}, text) {
   const n = document.createElement(tag);
@@ -150,6 +162,9 @@ function showCue(cue) {
   $("cue-kind").textContent = `${cue.clock}  ${label}`;
   $("cue-icon").setAttribute("href", `#${iconId}`);
   $("cue-text").textContent = cue.text;
+  $("cue-text").lang = cue.language;
+  box.dir = RTL.has(cue.language) ? "rtl" : "ltr";
+  speak(cue);
   const h = hero(cue);
   $("cue-hero").classList.toggle("empty", !h);
   if (h) { $("hero-value").textContent = h[0]; $("hero-label").textContent = h[1]; }
@@ -179,7 +194,7 @@ function showEvidence() {
 }
 function addToTimeline(cue) {
   const li = el("li", { class: `${cue.status === "verified" ? "verified " : ""}${cue.kind}` });
-  li.append(el("span", { class: "t" }, cue.clock), icon((KIND[cue.kind] || [, "i-chance"])[1]), el("span", { class: "x" }, cue.text));
+  li.append(el("span", { class: "t" }, cue.clock), icon((KIND[cue.kind] || [, "i-chance"])[1]), el("span", { class: "x", lang: cue.language }, cue.text));
   li.addEventListener("click", () => { seek(cue.t_ms - 4000); });
   $("timeline").prepend(li);
   $("rail-count").textContent = `${$("timeline").children.length} so far`;
@@ -339,6 +354,13 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("cue-evidence").addEventListener("click", () => { state.lastShown = state.shown || state.lastShown; showEvidence(); });
   $("play").addEventListener("click", () => setPlaying(!state.playing));
+  $("sound").addEventListener("click", () => {
+    state.sound = !state.sound;
+    $("sound").setAttribute("aria-pressed", String(state.sound));
+    $("sound").setAttribute("aria-label", state.sound ? "Commentary sound on" : "Commentary sound off");
+    $("sound-icon").setAttribute("href", state.sound ? "#i-sound" : "#i-mute");
+    if (!state.sound) { state.audio.pause(); $("sound").classList.remove("speaking"); }
+  });
   $("speed").addEventListener("change", () => { state.speed = Number($("speed").value); });
   $("lang").addEventListener("change", async () => { await loadCues(); seek(state.t); });
   $("match").addEventListener("change", () => loadMatch(state.list.find((m) => m.match_id === $("match").value)));

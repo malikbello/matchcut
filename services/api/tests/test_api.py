@@ -136,3 +136,17 @@ def test_rate_limit(settings):
     codes = [c.get("/api/matches").status_code for _ in range(5)]
     assert codes[:3] == [401, 401, 401]
     assert codes[3:] == [429, 429]
+
+
+def test_spoken_lines_are_served_only_by_strict_name(settings):
+    audio = settings.media_dir / "audio" / MATCH
+    audio.mkdir(parents=True)
+    (audio / "CU-00001-en-NG.mp3").write_bytes(b"ID3")
+    c = TestClient(create_app(settings))
+    assert c.get(f"/media/audio/{MATCH}/CU-00001-en-NG.mp3").status_code == 401  # session first
+    _login(c)
+    r = c.get(f"/media/audio/{MATCH}/CU-00001-en-NG.mp3")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "audio/mpeg"
+    for bad in ("..%2F..%2Fsecret.mp3", "CU-00001-en-NG.wav", "notes.txt"):
+        assert c.get(f"/media/audio/{MATCH}/{bad}").status_code == 404
