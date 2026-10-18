@@ -12,11 +12,13 @@ import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Director } from "./camera.js";
 import { buildPitch, L, toWorld, W } from "./pitch.js";
 import { loadLibrary } from "./library.js";
+import { celebrationPose, planPackage, segmentAt } from "./package.js";
 import { Player } from "./players.js";
 import { FrameGovernor, ORDER, TIERS, webglAvailable } from "./quality.js";
 import { animateCrowd, buildStadium } from "./stadium.js";
 
 export { webglAvailable };
+export { Crowd } from "./crowd.js";
 
 function frameAt(feed, t) {
   const ts = feed.t;
@@ -118,7 +120,7 @@ export async function createShow({
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap; // soft filtering is built in since r180
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x070b14);
@@ -130,7 +132,7 @@ export async function createShow({
   // night match under floodlights: a key light high over the main stand, soft fill from the sky
   scene.add(new THREE.HemisphereLight(0xb8c7ff, 0x1b2a1b, 0.55));
   const key = new THREE.DirectionalLight(0xfff3e0, 2.6);
-  key.position.set(-40, 90, -60);
+  key.position.set(-35, 95, 55); // from the camera side: faces lit, shadows fall away from the lens
   key.shadow.camera.left = -L / 2 - 8;
   key.shadow.camera.right = L / 2 + 8;
   key.shadow.camera.top = W / 2 + 8;
@@ -140,7 +142,7 @@ export async function createShow({
   key.shadow.normalBias = 0.02;
   scene.add(key, key.target);
   const rim = new THREE.DirectionalLight(0xdfe8ff, 0.9);
-  rim.position.set(60, 70, 70);
+  rim.position.set(60, 70, -70);
   scene.add(rim);
 
   scene.add(buildPitch(renderer));
@@ -203,8 +205,10 @@ export async function createShow({
   let lastCutCheck = 0;
   let wallClock = 0;
   const ballPrev = new THREE.Vector3();
+  const teamOf = feed.slots;
 
-  function render(t, { spotlight = null, excitement = null, mode = null } = {}) {
+  // wall-clock bookkeeping and automatic quality step-down, once per rendered frame
+  function frameClock() {
     const now = performance.now();
     const wallDt = Math.min(0.1, (now - lastWall) / 1000);
     lastWall = now;
@@ -218,14 +222,11 @@ export async function createShow({
         onQuality(next);
       }
     }
-    // match time advanced this frame (seconds); seeking backwards resets smoothing
-    const matchDt = lastT === null || t < lastT ? 0 : Math.min(2, (t - lastT) / 1000);
-    lastT = t;
-    if (mode) director.setMode(mode);
+    return wallDt;
+  }
 
-    const [a, b, u, span] = frameAt(feed, t);
-    const pa = feed.p[a];
-    const pb = feed.p[b];
+  function placeBall(t) {
+    const [a, b, u] = frameAt(feed, t);
     const ba = feed.b[a];
     const bb = feed.b[b];
     const [bx, bz] = toWorld((ba[0] + (bb[0] - ba[0]) * u) / 10, (ba[1] + (bb[1] - ba[1]) * u) / 10);
@@ -237,49 +238,151 @@ export async function createShow({
       ball.rotateOnWorldAxis(axis, moved / 0.11);
     }
     ballPrev.copy(ball.position);
+  }
 
-    // a restart (or a seek) snaps players into place instead of animating a slide
-    const cutNow = cuts.some((c) => lastCutCheck < c && c <= t);
-    lastCutCheck = t;
+  // tracking position and velocity of one slot at time t (spline-smoothed; null when off the pitch)
+  function trackAt(slot, t) {
+    const [a, b, u, span] = frameAt(feed, t);
+    const pa = feed.p[a];
+    const pb = feed.p[b];
+    const xa = pa[2 * slot];
+    const xb = pb[2 * slot];
+    if (xa < 0 || xb < 0) return null;
+    const ya = pa[2 * slot + 1];
+    const yb = pb[2 * slot + 1];
+    const jump = Math.hypot(xb - xa, yb - ya) / 10 > 3; // a teleport in the data is never animated
+    if (jump) {
+      const [x, z] = toWorld((u < 0.5 ? xa : xb) / 10, (u < 0.5 ? ya : yb) / 10);
+      return { x, z, vx: 0, vz: 0, jump };
+    }
     const p0 = feed.p[Math.max(0, a - 1)];
     const p3 = feed.p[Math.min(feed.p.length - 1, b + 1)];
+    const x0 = p0[2 * slot] >= 0 ? p0[2 * slot] : xa;
+    const y0 = p0[2 * slot + 1] >= 0 ? p0[2 * slot + 1] : ya;
+    const x3 = p3[2 * slot] >= 0 ? p3[2 * slot] : xb;
+    const y3 = p3[2 * slot + 1] >= 0 ? p3[2 * slot + 1] : yb;
+    const [x, z] = toWorld(spline(x0, xa, xb, x3, u) / 10, spline(y0, ya, yb, y3, u) / 10);
+    return { x, z, vx: splineVel(x0, xa, xb, x3, u, span) / 10, vz: splineVel(y0, ya, yb, y3, u, span) / 10, jump };
+  }
+
+  // the live (or replayed) match at time t
+  function poseMatch(t, matchDt, snapAll) {
+    placeBall(t);
+    const cutNow = cuts.some((c) => lastCutCheck < c && c <= t);
+    lastCutCheck = t;
     for (let slot = 0; slot < players.length; slot++) {
       const pl = players[slot];
-      const xa = pa[2 * slot];
-      const xb = pb[2 * slot];
-      if (xa < 0 || xb < 0) {
-        pl.root.visible = false;
-        continue;
-      }
-      pl.root.visible = true;
-      const ya = pa[2 * slot + 1];
-      const yb = pb[2 * slot + 1];
-      const jump = Math.hypot(xb - xa, yb - ya) / 10 > 3; // teleport in the data: never animate it
-      const x0 = p0[2 * slot] >= 0 && !jump ? p0[2 * slot] : xa;
-      const y0 = p0[2 * slot + 1] >= 0 && !jump ? p0[2 * slot + 1] : ya;
-      const x3 = p3[2 * slot] >= 0 && !jump ? p3[2 * slot] : xb;
-      const y3 = p3[2 * slot + 1] >= 0 && !jump ? p3[2 * slot + 1] : yb;
-      const fx = jump ? (u < 0.5 ? xa : xb) : spline(x0, xa, xb, x3, u);
-      const fy = jump ? (u < 0.5 ? ya : yb) : spline(y0, ya, yb, y3, u);
-      const [x, z] = toWorld(fx / 10, fy / 10);
-      const vx = jump ? 0 : splineVel(x0, xa, xb, x3, u, span) / 10;
-      const vz = jump ? 0 : splineVel(y0, ya, yb, y3, u, span) / 10;
+      const tr = trackAt(slot, t);
+      pl.root.visible = Boolean(tr);
+      if (!tr) continue;
       pl.update({
-        x, z, vx, vz, ballX: bx, ballZ: bz, tMs: t, dt: matchDt,
-        event: eventNear(events[slot], t), snap: cutNow || matchDt === 0 || jump,
+        ...tr, ballX: ball.position.x, ballZ: ball.position.z, tMs: t, dt: matchDt,
+        event: eventNear(events[slot], t), snap: snapAll || cutNow || matchDt === 0 || tr.jump,
       });
     }
+  }
 
-    // excitement: danger near either goal, unless the Studio passes its own (goal, big chance)
-    const danger = THREE.MathUtils.clamp(1 - (L / 2 - Math.abs(bx)) / 30, 0, 1);
-    animateCrowd(stadium.crowd, wallClock, excitement ?? danger * 0.6);
-    director.update(ball.position, wallDt);
-    void spotlight;
+  function finish(wallDt, excitement, focus) {
+    animateCrowd(stadium.crowd, wallClock, excitement);
+    director.update(focus ?? ball.position, wallDt);
     composer.render();
+  }
+
+  function render(t, { excitement = null, mode = null } = {}) {
+    const wallDt = frameClock();
+    const matchDt = lastT === null || t < lastT ? 0 : Math.min(2, (t - lastT) / 1000);
+    lastT = t;
+    if (mode) director.setMode(mode);
+    poseMatch(t, matchDt, false);
+    // excitement: danger near either goal, unless the Studio passes its own (goal, big chance)
+    const danger = THREE.MathUtils.clamp(1 - (L / 2 - Math.abs(ball.position.x)) / 30, 0, 1);
+    const level = excitement ?? danger * 0.6;
+    finish(wallDt, level);
+    return { excitement: level };
+  }
+
+  // ---------------------------------------------------------------- goal package
+  const goalEvents = (feed.events ?? []).filter((e) => e[1] === "goal");
+  const shotEvents = (feed.events ?? []).filter((e) => e[1] === "shot");
+  let activeSeg = null;
+  let celebrationStart = null;
+
+  function packageFor(goal) {
+    const ev = goalEvents.find((e) => Math.abs(e[0] - goal.t) < 1500);
+    const shot = [...shotEvents].reverse().find((e) => e[0] <= goal.t && goal.t - e[0] < 4000);
+    const plan = planPackage(goal, shot?.[0]);
+    plan.scorer = ev ? ev[2] : shot ? shot[2] : -1;
+    // which goal: where the ball was during the strike (the engine may already have reset it at the goal time)
+    const [a] = frameAt(feed, plan.strike + 200);
+    plan.side = feed.b[a][0] / 10 >= L / 2 ? 1 : -1;
+    return plan;
+  }
+
+  // Render the package at pt seconds. Returns { label, wipe, done } for the Studio's graphics.
+  function renderPackage(plan, pt) {
+    const wallDt = frameClock();
+    const seg = segmentAt(plan, pt);
+    if (!seg) return { done: true };
+    const entering = seg !== activeSeg;
+    activeSeg = seg;
+    if (seg.kind === "wipe") {
+      composer.render();
+      return { wipe: true, label: "", excitement: 0.6 };
+    }
+    if (seg.kind === "replay") {
+      const t = seg.from + (pt - seg.start) * seg.rate * 1000;
+      const matchDt = entering ? 0 : Math.min(0.5, wallDt * seg.rate);
+      director.setMode(seg.mode);
+      director.lockGoal(plan.side);
+      if (entering) director.cut();
+      lastT = t;
+      poseMatch(t, matchDt, entering);
+      finish(wallDt, 0.55);
+      return { label: seg.label, slowMotion: seg.rate < 0.5, excitement: 0.55 };
+    }
+    // celebration
+    const t0 = plan.goal.t + 600;
+    if (entering || !celebrationStart) {
+      celebrationStart = {};
+      for (let s = 0; s < players.length; s++) {
+        const tr = trackAt(s, t0);
+        if (tr) celebrationStart[s] = [tr.x, tr.z];
+      }
+      placeBall(t0);
+    }
+    const tc = pt - seg.start;
+    const scorer = plan.scorer >= 0 && celebrationStart[plan.scorer] ? plan.scorer : Number(Object.keys(celebrationStart)[0]);
+    const poses = celebrationPose(celebrationStart, { scorer, scorerTeam: teamOf[scorer], teamOf, keepers, tc });
+    const tMs = t0 + tc * 1000;
+    for (let s = 0; s < players.length; s++) {
+      const pl = players[s];
+      const pose = poses[s];
+      pl.root.visible = Boolean(pose);
+      if (!pose) continue;
+      const cel = pose.celebrate;
+      // a celebrating player plays the victory clip from the moment he arrives
+      const event = cel === null || cel === undefined ? null : [tMs - cel * 1000, "celebrate", s, "", "", -1, -1, -1, -1, -1];
+      pl.update({ x: pose.x, z: pose.z, vx: pose.vx, vz: pose.vz, ballX: ball.position.x, ballZ: ball.position.z,
+        tMs, dt: entering ? 0 : wallDt, event, snap: entering });
+    }
+    director.setMode("tight");
+    if (entering) director.cut();
+    const focus = new THREE.Vector3(poses[scorer].x, 0, poses[scorer].z);
+    finish(wallDt, 1, focus);
+    return { label: "", excitement: 1 };
   }
 
   return {
     render,
+    packageFor,
+    renderPackage,
+    endPackage() {
+      activeSeg = null;
+      celebrationStart = null;
+      lastT = null;
+      director.lockGoal(null);
+      director.cut();
+    },
     get quality() {
       return tierName;
     },

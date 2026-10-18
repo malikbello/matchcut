@@ -9,10 +9,11 @@ const KIND = {
   card: ["Card", "i-card"], substitution: ["Substitution", "i-sub"],
 };
 // one hero number per card: the fact that best tells the moment, and its short label
+// chance quality is shown as fans say it ("9 times in 10"), never as a raw xG decimal
 const HERO = {
-  goal: [["expected goals of the shot (0", "xG"]],
-  big_chance: [["expected goals of the shot (0", "xG"]],
-  great_save: [["expected goals of the shot that was saved", "xG denied"]],
+  goal: [["times in 10 a chance", "in 10 scored"], ["a chance like this is scored once", "tries per goal"]],
+  big_chance: [["times in 10 a chance", "in 10 scored"], ["a chance like this is scored once", "tries per goal"]],
+  great_save: [["times in 10 a chance", "in 10 scored"], ["a chance like this is scored once", "tries per goal"]],
   speed_peak: [["top speed in km/h", "km/h"]],
   tactical_shift: [["opponent passes per defensive action, last", "PPDA now"]],
   momentum_swing: [["momentum", "momentum"]],
@@ -30,12 +31,41 @@ const now = () => performance.now();
 const state = {
   match: null, feed: null, cues: [], moments: [], t: 0, end: 5400000, playing: true, speed: 15,
   shown: null, shownAt: 0, lastFrame: performance.now(), trail: [], dpr: 1,
-  sound: true, audio: new Audio(), view: "3d", show: null,
+  sound: true, audio: new Audio(), callAudio: new Audio(), calls: [], view: "3d", show: null, pkg: null,
 };
-state.audio.addEventListener("playing", () => $("sound").classList.add("speaking"));
-state.audio.addEventListener("ended", () => $("sound").classList.remove("speaking"));
+state.audio.addEventListener("playing", () => { $("sound").classList.add("speaking"); state.crowd?.duck(true); });
+state.audio.addEventListener("ended", () => { $("sound").classList.remove("speaking"); state.crowd?.duck(false); });
+state.callAudio.addEventListener("playing", () => state.crowd?.duck(true));
+state.callAudio.addEventListener("ended", () => state.crowd?.duck(false));
 
+// the crowd mix lives in the show bundle; it plays in 2D and 3D, once the viewer has interacted
+async function startCrowd() {
+  if (state.crowd || state.crowdStarting) return;
+  state.crowdStarting = true;
+  try {
+    const mod = await import("./dist/show3d.js");
+    state.crowd = new mod.Crowd("assets/audio/crowd");
+    state.crowd.setEnabled(state.sound);
+    await state.crowd.start();
+  } catch (err) { console.warn("crowd audio unavailable", err); }
+}
+// 2D excitement: how close the ball is to either goal
+function dangerAt(t) {
+  if (!state.feed) return 0;
+  const [a] = frameAt(t);
+  const bx = state.feed.b[a][0] / 10;
+  return Math.max(0, Math.min(1, 1 - (PITCH.L / 2 - Math.abs(bx - PITCH.L / 2)) / 30)) * 0.6;
+}
+
+// the play-by-play voice: live calls cut in over a co-commentary line still playing
+function call(c) {
+  if (!state.sound || !c.audio) return;
+  state.audio.pause();
+  state.callAudio.src = `/media/${c.audio}`;
+  state.callAudio.play().catch(() => {});
+}
 function speak(cue) {
+  if (!state.callAudio.paused && !state.callAudio.ended) return; // never talk over a live call
   state.audio.pause();
   $("sound").classList.remove("speaking");
   if (!state.sound || !cue.audio) return;
@@ -114,6 +144,13 @@ async function startShow() {
     $("show-loading").hidden = true;
   }
 }
+function endPackage() {
+  if (!state.pkg) return;
+  state.t = Math.max(state.t, state.pkg.goal.t + 1500);
+  state.pkg = null;
+  state.show?.endPackage();
+  $("wipe").hidden = true; $("replay-bug").hidden = true; $("skip-replay").hidden = true;
+}
 function setView(view) {
   state.view = view;
   const is3d = view === "3d";
@@ -124,7 +161,10 @@ function setView(view) {
   if (!is3d) resize();
 }
 async function loadCues() {
-  state.cues = await api(`/api/matches/${encodeURIComponent(state.match.match_id)}/cues?lang=${$("lang").value}`);
+  const id = encodeURIComponent(state.match.match_id);
+  const lang = $("lang").value;
+  state.calls = await api(`/api/matches/${id}/calls?lang=${lang}`).catch(() => []);
+  state.cues = await api(`/api/matches/${id}/cues?lang=${lang}`);
   state.moments = state.cues; // one cue per moment, best available for this language
   if (!state.feed && state.cues.length) state.end = state.cues[state.cues.length - 1].t_ms + 120000;
   drawMarkers();
@@ -139,6 +179,7 @@ function teamOf(cue) {
 
 // ------------------------------------------------------------ clock
 function seek(t) {
+  endPackage();
   state.t = Math.max(0, Math.min(t, state.end));
   state.trail = [];
   state.shown = null;
@@ -153,12 +194,24 @@ function tick(now) {
 function step(now) {
   const dt = Math.min(now - state.lastFrame, 1000); // keep real time even when frames are slow
   state.lastFrame = now;
-  if (state.playing && state.t < state.end) {
+  if (state.pkg) {
+    // goal package: celebration and replays play in real time while the match clock holds
+    if (state.playing) state.pkg.pt += dt / 1000;
+  } else if (state.playing && state.t < state.end) {
     const before = state.t;
     state.t = Math.min(state.end, state.t + dt * state.speed);
+    const goal = state.view === "3d" && state.show && state.speed <= 15
+      ? (state.feed?.goals ?? []).find((g) => g.t > before && g.t <= state.t) : null;
+    if (goal) {
+      state.t = goal.t + 600;
+      state.pkg = { plan: state.show.packageFor(goal), pt: 0, goal };
+    }
+    if ((state.feed?.goals ?? []).some((g) => g.t > before && g.t <= state.t + 700)) state.crowd?.goal();
     for (const c of state.moments) {
       if (c.t_ms > before && c.t_ms <= state.t) { showCue(c); addToTimeline(c); }
     }
+    // play-by-play: at broadcast speeds only (at 40x the calls would trip over each other)
+    if (state.speed <= 15) for (const c of state.calls ?? []) if (c.t_ms > before && c.t_ms <= state.t) call(c);
     updateBug();
   }
   if (state.shown && now - state.shownAt > CUE_SECONDS * 1000) hideCue();
@@ -307,11 +360,22 @@ function renderPitch(W, H, d, X, Y, s) {
 }
 function draw() {
   if (state.view === "3d" && state.show && state.feed) {
-    const lit = state.shown && fact(state.shown, "player involved");
+    if (state.pkg) {
+      const res = state.show.renderPackage(state.pkg.plan, state.pkg.pt);
+      state.crowd?.update(res.excitement ?? 0.6);
+      $("wipe").hidden = !res.wipe;
+      $("replay-bug").hidden = !res.label;
+      $("replay-bug").classList.toggle("slow", Boolean(res.slowMotion));
+      $("skip-replay").hidden = false;
+      if (res.done) endPackage();
+      return;
+    }
     const excitement = state.shown && now() - state.shownAt < 6000 ? EXCITEMENT[state.shown.kind] : null;
-    state.show.render(state.t, { spotlight: lit ? lit.value : null, excitement });
+    const out = state.show.render(state.t, { excitement });
+    state.crowd?.update(out?.excitement ?? 0);
     return;
   }
+  state.crowd?.update(state.shown && now() - state.shownAt < 6000 ? EXCITEMENT[state.shown.kind] ?? dangerAt(state.t) : dangerAt(state.t));
   if (state.view === "3d" || !canvas.width || !canvas.height) return; // 3D still loading, or not on screen
   const W = canvas.width, H = canvas.height, d = state.dpr;
   const pad = 0.06 * W;
@@ -407,8 +471,10 @@ document.addEventListener("DOMContentLoaded", () => {
     $("sound").setAttribute("aria-label", state.sound ? "Commentary sound on" : "Commentary sound off");
     $("sound-icon").setAttribute("href", state.sound ? "#i-sound" : "#i-mute");
     if (!state.sound) { state.audio.pause(); $("sound").classList.remove("speaking"); }
+    state.crowd?.setEnabled(state.sound);
   });
   $("speed").addEventListener("change", () => { state.speed = Number($("speed").value); });
+  $("skip-replay").addEventListener("click", endPackage);
   $("view-3d").addEventListener("click", () => setView("3d"));
   $("view-2d").addEventListener("click", () => setView("2d"));
   $("cam").addEventListener("change", () => state.show?.setMode($("cam").value));
@@ -420,12 +486,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("keydown", (e) => {
     if ($("studio").hidden || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
     if (e.code === "Space") { e.preventDefault(); setPlaying(!state.playing); }
+    if (e.code === "Escape") endPackage();
     if (e.code === "ArrowRight") seek(state.t + 30000);
     if (e.code === "ArrowLeft") seek(state.t - 30000);
   });
   window.addEventListener("resize", resize);
   state.speed = Number($("speed").value);
   setView(state.view);
+  for (const ev of ["pointerdown", "keydown"]) document.addEventListener(ev, startCrowd, { once: true });
   requestAnimationFrame(tick);
   start().catch(() => showGate()); // an existing session skips the gate
 });

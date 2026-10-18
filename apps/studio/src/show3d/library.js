@@ -94,6 +94,8 @@ export function actionFor(ev, { keeper, speed, meta }) {
       return { clip: pick("throw_in"), faceTarget: true };
     case "foul":
       return { clip: pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false };
+    case "celebrate":
+      return { clip: pick("victory"), faceTarget: false, celebrate: true };
     case "fouled":
       return { clip: pick("soccer_trip", "fallen_idle"), faceTarget: false };
     default:

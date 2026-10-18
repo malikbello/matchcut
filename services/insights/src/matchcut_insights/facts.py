@@ -29,6 +29,19 @@ METRIC_LABELS = {
 }
 
 
+# Chance quality as fans say it ("he scores that nine times out of ten", as Opta explain xG).
+# Computed here, never by a model, so the Verifier can check the number in the line.
+CHANCE_IN_10 = "times in 10 a chance like this is scored"
+CHANCE_ONE_IN = "a chance like this is scored once in every this many attempts"
+
+
+def chance_facts(xg: float, saved: bool = False) -> list[tuple[str, int]]:
+    suffix = " (the shot that was saved)" if saved else ""
+    if xg >= 0.15:
+        return [(CHANCE_IN_10 + suffix, round(xg * 10))]
+    return [(CHANCE_ONE_IN + suffix, max(2, round(1 / max(xg, 0.01))))]
+
+
 @dataclass(frozen=True)
 class MatchContext:
     """Names the fact sheet can resolve: the two clubs and every player in the match."""
@@ -70,6 +83,8 @@ def build_facts(moment: Moment, snapshot: Mapping[str, Any], ctx: MatchContext) 
             facts.append(("substitute coming on", ctx.players[value].known_as))
         elif key != "score":  # the score is already a fact
             facts.append((METRIC_LABELS.get(key, key.replace("_", " ")), value))
+            if key in ("xg", "xg_saved") and isinstance(value, int | float):
+                facts.extend(chance_facts(float(value), saved=key == "xg_saved"))
     for club in (ctx.home, ctx.away):
         s = snapshot.get(club.club_id) or {}
         facts.append((f"{club.name} shots", s.get("shots", 0)))

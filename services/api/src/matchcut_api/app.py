@@ -40,7 +40,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")  # BCP 47: en, en-NG, pcm, ar, yo
-AUDIO_NAME = re.compile(r"^CU-\d{5}-[a-z]{2,3}(-[A-Z]{2})?\.mp3$")
+AUDIO_NAME = re.compile(r"^(CU|CA)-\d{5}-[a-z]{2,3}(-[A-Z]{2})?\.mp3$")  # cue lines and play-by-play calls
 COOKIE = "mc_session"
 SESSION_TTL_S = 12 * 3600
 # 'wasm-unsafe-eval' lets the 3D show camera compile its meshopt WebAssembly decoder; it does not
@@ -63,6 +63,7 @@ class Settings:
     requests_per_minute: int = 120
     streams_per_client: int = 3
     secure_cookie: bool = True
+    calls_dir: Path = Path("out/calls")
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -76,6 +77,7 @@ class Settings:
             code_hashes=frozenset(h.strip().lower() for h in codes.split(",") if h.strip()),
             secret=os.environ.get("MATCHCUT_SESSION_SECRET") or secrets.token_urlsafe(32),
             secure_cookie=os.environ.get("MATCHCUT_INSECURE_COOKIE") != "1",
+            calls_dir=Path(os.environ.get("MATCHCUT_CALLS_DIR", "out/calls")),
         )
 
 
@@ -204,6 +206,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/matches/{match_id}/cues", dependencies=[Depends(require_session)])
     def cues(match_id: str, lang: str = "en") -> list[dict]:
         return [json.loads(c.model_dump_json()) for c in load_cues(s, match_id, lang)]
+
+    @app.get("/api/matches/{match_id}/calls", dependencies=[Depends(require_session)])
+    def calls(match_id: str, lang: str = "en") -> list[dict]:
+        """Play-by-play calls (build-up, goal, save, miss) for one language, in match order."""
+        path = s.calls_dir / f"{match_id}.json"
+        if not MATCH_ID.match(match_id) or not LANG.match(lang) or not path.is_file():
+            return []
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        return [r for r in rows if r.get("language") == lang]
 
     @app.get("/api/matches/{match_id}/stream", dependencies=[Depends(require_session)])
     async def stream(request: Request, match_id: str, lang: str = "en", from_ms: int = 0, speed: float = 1.0):

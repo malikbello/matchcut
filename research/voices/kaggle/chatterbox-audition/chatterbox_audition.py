@@ -20,6 +20,9 @@ subprocess.run(
     [sys.executable, "-m", "pip", "install", "-q", "chatterbox-tts", "soundfile", "pandas", "pyarrow"],
     check=True,
 )
+# chatterbox pins its own torch; Kaggle's torchvision then no longer matches and breaks
+# transformers' imports. Chatterbox does not use torchvision, so remove it.
+subprocess.run([sys.executable, "-m", "pip", "uninstall", "-y", "-q", "torchvision"], check=False)
 
 from pathlib import Path  # noqa: E402
 

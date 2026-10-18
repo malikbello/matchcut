@@ -37,7 +37,7 @@ SCORE_SPEECH = {
 SPELL = {"xG": "x G", "PPDA": "P P D A"}
 
 
-def ssml(text: str, lang: str, voice: str, style: str | None = None) -> str:
+def ssml(text: str, lang: str, voice: str, style: str | None = None, lift: bool = False) -> str:
     """Build SSML for one line: escape, mark up scores and abbreviations, then set the delivery."""
     sep, zero = SCORE_SPEECH.get(lang, (" ", None))
 
@@ -49,10 +49,14 @@ def ssml(text: str, lang: str, voice: str, style: str | None = None) -> str:
     for written, spoken in SPELL.items():
         body = body.replace(written, f'<sub alias="{spoken}">{written}</sub>')
     locale = voice.split("-", 2)[0] + "-" + voice.split("-", 2)[1]
+    if lift:  # a build-up call: the voice rises and quickens as the chance opens up
+        body = f'<prosody rate="+12%" pitch="+6%">{body}</prosody>'
+    elif (
+        not style and ":" not in voice
+    ):  # classic neural voice: lift the pace; expressive voices set their own
+        body = f'<prosody rate="+6%">{body}</prosody>'
     if style:
         body = f'<mstts:express-as style="{style}">{body}</mstts:express-as>'
-    elif ":" not in voice:  # classic neural voice: lift the pace; expressive voices set their own
-        body = f'<prosody rate="+6%">{body}</prosody>'
     return (
         f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
         f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="{locale}">'
@@ -90,7 +94,7 @@ class AzureSpeech:
         voice, _, style = key.split(":", 1)[1].partition("#")
         r = self.client.post(
             self.url,
-            content=ssml(text, lang, voice, style or None).encode("utf-8"),
+            content=ssml(text, lang, voice, style or None, lift=kind == "build").encode("utf-8"),
             headers={
                 "Authorization": f"Bearer aad#{self.resource_id}#{self.token()}",
                 "Content-Type": "application/ssml+xml",
@@ -150,3 +154,33 @@ def _read_manifest(folder: Path) -> dict[str, str]:
     except (OSError, ValueError):
         return {}
     return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+
+
+def voice_calls(calls: list, match_id: str, speech: AzureSpeech, media_root: str | Path) -> int:
+    """Voice play-by-play calls (see calls.py); cached by call ID and voice like the cues."""
+    from matchcut_insights.calls import CALL_MOOD  # noqa: PLC0415 - avoids an import cycle
+
+    folder = Path(media_root) / "audio" / match_id
+    manifest = _read_manifest(folder)
+    done = 0
+    for call in calls:
+        mood = CALL_MOOD.get(call.kind, "")
+        key = voice_key(call.language, mood)
+        if key is None:
+            continue
+        key = f"{key}+lift" if call.kind == "build" else key
+        rel = Path("audio") / match_id / f"{call.call_id}.mp3"
+        target = Path(media_root) / rel
+        if not (target.is_file() and manifest.get(call.call_id) == key):
+            result = speech.synthesize(call.text, call.language, mood)
+            if result is None:
+                continue
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(result[0])
+            manifest[call.call_id] = key
+        call.audio, call.voice = rel.as_posix(), key
+        done += 1
+    if manifest:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True), encoding="utf-8")
+    return done
