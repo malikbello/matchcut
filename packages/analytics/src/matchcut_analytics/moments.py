@@ -1,12 +1,17 @@
 """Moment detection: decide, in code, what is worth putting on screen.
 
 Each moment carries the events that prove it and the numbers agents may cite.
-Tactical shifts (a team switching to a high press) are found from the signal
-that is reliably visible in event data: pressing actions in the opponent's
-half. A shift is declared when the last 5 minutes contain at least double the
-team's recent 5-minute average (previous 15 minutes) and at least 12 more
-actions. Defensive-line height was evaluated and rejected as too sparse and
-noisy per minute (see ADR-0008). Detections are scored against the simulator's hidden truth.
+Tactical shifts (a team switching to a high press) are found with PPDA, the
+standard pressing measure: opponent passes in their own defensive 60% divided by
+our defensive actions there (tackles, interceptions, fouls and pressures).
+Raw pressing counts mostly track how much the opponent has the ball; PPDA
+normalises for that exposure. A shift is declared when (smoothed) PPDA over the
+last 8 minutes falls to 55% or less of the previous 20 minutes, with enough
+opponent build-up in both windows. The settings were tuned on separate seeds
+and are reported on held-out matches. Defensive-line height and a tracking
+signal (defenders near the ball) were evaluated and rejected as weaker (see
+ADR-0008). The on-screen claim is what was measured (pressing intensified),
+not a coach's intent. Detections are scored against the simulator's hidden truth.
 """
 
 from __future__ import annotations
@@ -24,9 +29,14 @@ SPEED_PEAK_MPS = 9.45  # 34 km/h
 MOMENTUM_SWING = 0.45
 COOLDOWN_S = 300
 TACTIC_COOLDOWN_S = 900
-PRESS_RECENT_MIN = 5
-PRESS_BASELINE_MIN = 15
-PRESS_MIN_INCREASE = 12
+PRESS_RECENT_MIN = 8
+PRESS_BASELINE_MIN = 20
+PRESS_FIRST_TEST_MIN = 20
+PPDA_ZONE_X = 63.0  # the opponent's own defensive 60%, in the opponent's attacking frame
+PPDA_DROP = 0.55  # recent PPDA must fall to <= 55% of the baseline (pressing ~1.8x more intense)
+MIN_ZONE_PASSES = 8  # enough opponent build-up in each window to judge pressing
+# smoothing pseudo-counts: (actions + 0.5) / (passes + 2) keeps sparse windows from flipping the test
+PSEUDO_ACTIONS, PSEUDO_PASSES = 0.5, 2.0
 
 
 def clock_of(e: MatchEvent) -> str:
@@ -41,11 +51,17 @@ class MomentDetector:
     _last: dict[tuple[str, str | None], float] = field(default_factory=dict)
     _last_momentum_sign: int = 0
     _minute: int = -1
-    _press_minutes: dict[str, dict[int, int]] = field(default_factory=dict)  # pressing actions per minute
+    _press_minutes: dict[str, dict[int, int]] = field(
+        default_factory=dict
+    )  # our actions in their zone, per minute
+    _zone_passes: dict[str, dict[int, int]] = field(
+        default_factory=dict
+    )  # their passes in their own zone, per minute
 
     def __post_init__(self) -> None:
         for tid in self.state.teams:
             self._press_minutes[tid] = {}
+            self._zone_passes[tid] = {}
 
     # ------------------------------------------------------------ helpers
     def _emit(
@@ -154,15 +170,17 @@ class MomentDetector:
                     [e.event_id],
                     {"xg": round(xg, 2)},
                 )
-        if (
-            e.team_id
-            and e.type in (EventType.TACKLE, EventType.INTERCEPTION, EventType.PRESSURE)
-            and e.x is not None
-        ):
+        minute_now = int(t_s // 60)
+        if e.team_id and e.x is not None:
             x, _ = to_attacking(e.x, e.y or 34, e.attacking_right)
-            if x >= 52.5:
-                mins = self._press_minutes[e.team_id]
-                mins[int(t_s // 60)] = mins.get(int(t_s // 60), 0) + 1
+            if e.type in (EventType.TACKLE, EventType.INTERCEPTION, EventType.FOUL, EventType.PRESSURE):
+                if x >= 105 - PPDA_ZONE_X:  # inside the opponent's own defensive 60%
+                    mins = self._press_minutes[e.team_id]
+                    mins[minute_now] = mins.get(minute_now, 0) + 1
+            elif e.type == EventType.PASS and x <= PPDA_ZONE_X:
+                presser = self.state.other(e.team_id)  # this pass is build-up the other team can press
+                zp = self._zone_passes[presser]
+                zp[minute_now] = zp.get(minute_now, 0) + 1
         # momentum swing
         mom = self.state.momentum
         sign = 1 if mom > MOMENTUM_SWING else -1 if mom < -MOMENTUM_SWING else 0
@@ -219,20 +237,19 @@ class MomentDetector:
             self._minute = minute
             t_s = t_ms / 1000
             for tid in self.state.teams:
-                if minute < PRESS_BASELINE_MIN + PRESS_RECENT_MIN:
+                if minute < PRESS_FIRST_TEST_MIN:
                     continue
-                mins = self._press_minutes[tid]
-                recent = sum(mins.get(m, 0) for m in range(minute - PRESS_RECENT_MIN, minute))
-                base_total = sum(
-                    mins.get(m, 0)
-                    for m in range(minute - PRESS_RECENT_MIN - PRESS_BASELINE_MIN, minute - PRESS_RECENT_MIN)
-                )
-                baseline = base_total / (PRESS_BASELINE_MIN / PRESS_RECENT_MIN)  # per 5-minute window
-                if (
-                    recent >= 2.0 * baseline
-                    and recent - baseline >= PRESS_MIN_INCREASE
-                    and self._cool(("tactic", tid), t_s, TACTIC_COOLDOWN_S)
-                ):
+                win_r = range(minute - PRESS_RECENT_MIN, minute)
+                win_b = range(minute - PRESS_RECENT_MIN - PRESS_BASELINE_MIN, minute - PRESS_RECENT_MIN)
+                acts, passes = self._press_minutes[tid], self._zone_passes[tid]
+                a_r, p_r = sum(acts.get(m, 0) for m in win_r), sum(passes.get(m, 0) for m in win_r)
+                a_b, p_b = sum(acts.get(m, 0) for m in win_b), sum(passes.get(m, 0) for m in win_b)
+                if p_r < MIN_ZONE_PASSES or p_b < MIN_ZONE_PASSES:
+                    continue
+                # passes allowed per defensive action (lower = more pressing), lightly smoothed
+                ppda_r = (p_r + PSEUDO_PASSES) / (a_r + PSEUDO_ACTIONS)
+                ppda_b = (p_b + PSEUDO_PASSES) / (a_b + PSEUDO_ACTIONS)
+                if ppda_r <= PPDA_DROP * ppda_b and self._cool(("tactic", tid), t_s, TACTIC_COOLDOWN_S):
                     self._emit(
                         t_ms,
                         clock,
@@ -243,8 +260,8 @@ class MomentDetector:
                         [],
                         {
                             "signal": "pressing",
-                            "high_press_actions_last_5_min": recent,
-                            "average_per_5_min_before": round(baseline, 1),
+                            "ppda_last_8_min": round(ppda_r, 1),
+                            "ppda_before": round(ppda_b, 1),
                         },
                     )
         return self.moments[before:]

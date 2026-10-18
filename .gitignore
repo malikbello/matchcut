@@ -44,3 +44,6 @@ data/
 
 # Licensed third-party assets that must never be redistributed (e.g. Mixamo raw files)
 assets-private/
+
+# Raw downloaded asset packs (large); processed outputs live in web/public/assets
+assets-cc0/

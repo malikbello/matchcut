@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D2 complete (branch `d2/history-analytics`)
+**Updated:** Sun 18 Oct 2026 · **Phase:** D2 complete; D3 in progress
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -15,17 +15,16 @@
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
-## Resume here (handoff, 17 Oct late evening)
-- Branch `d2/history-analytics` is pushed (work in progress, not merged).
-- **Re-run when resuming** (interrupted by shutdown): `uv run matchcut-sim eval-tactics --matches 8` (new pressing-window detector) and `uv run matchcut-sim realism --matches 12` (after reverting the global defensive-line change). Both must pass, then open the D2 PR and merge on green CI.
-- Assets: Mixamo Soccer Game Pack (54) + 10 extra clips + Y Bot are in `assets-private/mixamo/` (git-ignored, local only). Blender is installed. Still to fetch: Quaternius UAL (CC0), CMU soccer mocap, Poly Haven textures.
-- Next: D3 (agents on Foundry + API + Studio), then D4 (3D show camera + vision lane).
+## Resume here (handoff, 18 Oct)
+- D2 is merged to `main` once CI is green (PR "D2: five-season universe, analytics, League Memory, data camera").
+- D3 is in progress on branch `d3/insights` (worktree `../matchcut-d3`): insights agents, API and Studio v0 are built and tested; the eval report and the PR are next.
+- Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 (CC0) and CMU soccer mocap in `assets-cc0/`. Blender is installed. Still to fetch: Poly Haven textures.
 
 ## Done in D2 (18 Oct)
 - **Five-season universe** (ADR-0007): Dixon-Coles results, 26 clubs with promotion and relegation, ageing curves, retirements, transfers, academy; permanent player IDs; current season matchdays 1–8 played, live match on matchday 9.
 - **Realism: 14 of 14 measures in range** over 12 matches. Conversion 10.0% (Premier League ~10.3%), inside the box 13.4% (~13%), outside 4.9% (~4%), outside-box share 40.5% (~43%). Research record: `docs/research/data-calibration.md`.
-- **Analytics package** (ADR-0008): xG; expected threat trained on our matches (Singh 2019); PPDA, field tilt, momentum, control vs chaos, sprints; moment detector with a CUSUM tactical-shift test scored against truth.
-- **League Memory:** SQLite (Azure SQL later) + MCP server (official SDK v2) with 6 read-only tools; every answer carries a query ID and evidence.
+- **Analytics package** (ADR-0008): xG; expected threat trained on our matches (Singh 2019); PPDA, field tilt, momentum, control vs chaos, sprints; moment detector; tactical shifts found with PPDA (tuned on 16 separate matches; held-out precision 83%, recall 62%, `reports/tactical-detection.md`).
+- **League Memory:** SQLite (Azure SQL later) + MCP server (official SDK) with 6 read-only tools; every answer carries a query ID and evidence.
 - **Data camera** (ADR-0009): Skia broadcast renderer with director, per-frame camera truth and screen boxes for the vision lane.
 - **Quality:** 46 tests, 90% coverage; ruff and pyright clean; contracts 1.1.0.
 
@@ -40,4 +39,5 @@
 | 17 Oct | Auto-eventing from video in scope; AI narration for the demo film |
 | 18 Oct | Show camera animation sources: Mixamo (football actions, raw files kept private, baked into the app, never in the public repo), CMU motion capture, Quaternius CC0; public repo falls back to CMU + Quaternius. Automatic Low/Medium/High quality with 2D fallback; High is the default and the demo standard |
 | 18 Oct | Five seasons with squad evolution; show camera (premium stylised 3D) approved; video-game quality on the roadmap |
+| 18 Oct | Tactical-shift cards state what was measured ("pressing harder", PPDA before and after), not a coach's intent |
 | 18 Oct | Agent-based tracking-first engine (ADR-0002); Event Hubs backbone (ADR-0003); Container Apps + Jobs (ADR-0004); keyless security (ADR-0005); uv monorepo (ADR-0006) |

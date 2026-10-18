@@ -40,7 +40,7 @@ Source: UK Financial Conduct Authority, *Exploring Synthetic Data Validation: pr
 | Expected goals (distance, angle, header, pressure) | Public open-play xG benchmarks |
 | Expected threat (xT), Markov value iteration on a 16 × 12 grid | Karun Singh (2019), *Introducing Expected Threat*; also implemented in `socceraction` (MIT) |
 | PPDA, field tilt, possession by passes | Common analytics practice |
-| Tactical change detection (CUSUM) | Page (1954) change-point method |
+| Tactical change detection (PPDA drop) | PPDA as used by Opta/StatsBomb pressing analysis; CUSUM (Page 1954) evaluated and rejected |
 
 ## Data standards
 - **Common Data Format (CDF) v1.0** for match sheet, event, tracking, video and metadata (Anzer et al., 2025; arXiv:2505.15820). Planned as the export format.
