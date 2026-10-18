@@ -25,4 +25,4 @@ packages = ["src/matchcut_insights"]
 
 [project.optional-dependencies]
 # Microsoft's model-graded evaluators for the eval command; not needed in production containers
-evals = ["azure-ai-evaluation>=1.18"]
+evals = ["azure-ai-evaluation>=1.18"]  # install with: uv sync --extra evals (pulls nltk, which has an open advisory)
