@@ -202,6 +202,27 @@ export class Player {
       if (o.isBone && /(foot|ball|toe)/i.test(o.name)) minY = Math.min(minY, o.getWorldPosition(p).y);
     });
     if (Number.isFinite(minY)) body.position.y -= minY - 0.03; // soles on the turf
+    // which way the model faces, measured from its own feet (heel to toe), so any character works
+    const heel = new THREE.Vector3();
+    const toe = new THREE.Vector3();
+    let found = 0;
+    body.traverse((o) => {
+      if (!o.isBone) return;
+      if (/^foot_l$|LeftFoot$/i.test(o.name)) {
+        o.getWorldPosition(heel);
+        found++;
+      }
+      if (/^ball_l$|LeftToeBase$/i.test(o.name)) {
+        o.getWorldPosition(toe);
+        found++;
+      }
+    });
+    const fwd = toe.sub(heel);
+    this.yawOffset = found === 2 && Math.hypot(fwd.x, fwd.z) > 1e-4 ? Math.atan2(fwd.x, fwd.z) : 0;
+    this.hands = [];
+    body.traverse((o) => {
+      if (o.isBone && /^hand_[lr]$|(Left|Right)Hand$/i.test(o.name)) this.hands.push(o);
+    });
     this.body = body;
     this.mixer = new THREE.AnimationMixer(body);
     const clip = (n) => lib.clips.get(n);
@@ -228,6 +249,17 @@ export class Player {
     this.heading = 0;
     this.speed = 0;
     this.current = null; // { action, start, contact, duration, face }
+  }
+
+  // where the ball belongs when this player controls it: in the gloves after a catch,
+  // otherwise just ahead of his feet in the direction he faces
+  ballSpot(out) {
+    if (this.catching && this.hands.length) {
+      const a = this.hands[0].getWorldPosition(new THREE.Vector3());
+      const b = this.hands.at(-1).getWorldPosition(new THREE.Vector3());
+      return out.copy(a).add(b).multiplyScalar(0.5);
+    }
+    return out.set(this.root.position.x + Math.sin(this.heading) * 0.42, 0.11, this.root.position.z + Math.cos(this.heading) * 0.42);
   }
 
   // a substitution puts a new player in this slot: new name and number on the shirt
@@ -303,7 +335,8 @@ export class Player {
 
     const turn = wrap(target - this.heading);
     this.heading = snap ? target : this.heading + Math.sign(turn) * Math.min(Math.abs(turn), TURN_RATE * dt);
-    this.root.rotation.y = this.heading;
+    this.root.rotation.y = this.heading - this.yawOffset;
+    this.catching = Boolean(act && this.keeper && event && event[1] === "save" && tMs >= event[0]);
 
     // locomotion blend space
     const moving = THREE.MathUtils.smoothstep(s, 0.25, 0.9);
