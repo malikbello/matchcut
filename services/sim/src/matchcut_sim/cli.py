@@ -289,7 +289,7 @@ def main(argv: list[str] | None = None) -> None:
     h.add_argument("--league-seed", type=int, default=2026)
     h.add_argument("--out", default="out/cdf")
     h.set_defaults(fn=cmd_cdf)
-    f = sub.add_parser("feed", help="write the compact 5 Hz screen feed for one match")
+    f = sub.add_parser("feed", help="write the 10 Hz screen feed (positions, events, restarts) for one match")
     f.add_argument("--home", default="kes")
     f.add_argument("--away", default="irv")
     f.add_argument("--seed", type=int, default=7)
