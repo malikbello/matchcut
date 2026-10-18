@@ -21,84 +21,167 @@ const FADE_OUT = 0.3;
 const TURN_RATE = 7; // rad/s, body yaw
 const SPRINT_FACING = 4.3; // above this speed players face where they run
 
-function kitMaterial(source, colours, bounds, role) {
-  const mat = new THREE.MeshStandardMaterial({ roughness: role === "joints" ? 0.45 : 0.72, metalness: role === "joints" ? 0.25 : 0 });
+// Kit painted over the textured athlete. Regions are measured on the bind pose (the
+// un-skinned position), so they follow the body as it animates: boots, socks, shorts,
+// shirt with short sleeves and collar; skin keeps the character's texture, tinted to the
+// player's tone. On the back of the shirt a decal carries the name and number, projected
+// from the bind pose too, as broadcast close-ups demand.
+function kitMaterial(source, colours, frame, decal) {
+  const mat = source.clone();
   const u = {
     uShirt: { value: new THREE.Color(colours.shirt) },
     uTrim: { value: new THREE.Color(colours.trim) },
     uShorts: { value: new THREE.Color(colours.shorts) },
     uSocks: { value: new THREE.Color(colours.socks) },
     uSkin: { value: new THREE.Color(colours.skin) },
-    uBoots: { value: new THREE.Color(0x101010) },
-    uMinY: { value: bounds.min.y },
-    uSpanY: { value: bounds.max.y - bounds.min.y },
-    uHalfW: { value: Math.max(1e-4, (bounds.max.x - bounds.min.x) / 2) },
-    uJoints: { value: role === "joints" ? 1 : 0 },
+    uBoots: { value: new THREE.Color(colours.boots) },
+    uMinY: { value: frame.minY },
+    uSpanY: { value: frame.spanY },
+    uHalfW: { value: frame.halfW },
+    uCenterX: { value: frame.centerX },
+    uFront: { value: frame.front },
+    uDecal: { value: decal },
   };
+  mat.userData.kit = u;
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, u);
     shader.vertexShader = shader.vertexShader
-      .replace("#include <common>", "#include <common>\nvarying vec3 vBind;")
-      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvBind = position;");
+      .replace("#include <common>", "#include <common>\nvarying vec3 vBind;\nvarying vec3 vBindN;")
+      .replace("#include <begin_vertex>", "#include <begin_vertex>\nvBind = position;\nvBindN = normal;");
     shader.fragmentShader = shader.fragmentShader
       .replace(
         "#include <common>",
         `#include <common>
          varying vec3 vBind;
+         varying vec3 vBindN;
          uniform vec3 uShirt, uTrim, uShorts, uSocks, uSkin, uBoots;
-         uniform float uMinY, uSpanY, uHalfW, uJoints;`,
+         uniform float uMinY, uSpanY, uHalfW, uCenterX, uFront;
+         uniform sampler2D uDecal;
+         float kitMask;`,
       )
       .replace(
-        "#include <color_fragment>",
-        `#include <color_fragment>
+        "#include <map_fragment>",
+        `#include <map_fragment>
          float h = (vBind.y - uMinY) / uSpanY;
-         float side = abs(vBind.x) / uHalfW;
-         vec3 kit = uSkin;
-         if (h < 0.06) kit = uBoots;
+         float side = abs(vBind.x - uCenterX) / uHalfW;
+         float back = -uFront * vBindN.z;
+         vec3 kit = vec3(-1.0);
+         if (h < 0.055) kit = uBoots;
          else if (h < 0.27) kit = uSocks;
          else if (h < 0.29) kit = uTrim;
-         if (h >= 0.45 && h < 0.57) kit = uShorts;
-         if (h >= 0.57 && h < 0.84 && side < 0.40) kit = uShirt;
-         if (h >= 0.70 && h < 0.84 && side >= 0.18 && side < 0.40) kit = uShirt;
-         if (h >= 0.81 && h < 0.84 && side < 0.16) kit = uTrim;
-         if (uJoints > 0.5) kit = mix(kit, uTrim, 0.55) * 0.8;
-         diffuseColor.rgb = kit;`,
+         if (h >= 0.44 && h < 0.565) kit = uShorts;
+         if (h >= 0.555 && h < 0.815 && side < 0.30) kit = uShirt;
+         if (h >= 0.70 && h < 0.815 && side >= 0.30 && side < 0.48) kit = uShirt;          // sleeves
+         if (h >= 0.70 && h < 0.712 && side >= 0.46 && side < 0.48) kit = uTrim;           // cuffs
+         if (h >= 0.80 && h < 0.815 && side < 0.12) kit = uTrim;                            // collar
+         kitMask = kit.x < 0.0 ? 0.0 : 1.0;
+         if (kitMask > 0.5) {
+           // name and number on the back of the shirt
+           if (back > 0.2 && h > 0.60 && h < 0.79 && side < 0.22) {
+             vec2 uv = vec2(0.5 - uFront * (vBind.x - uCenterX) / (0.44 * uHalfW), (h - 0.60) / 0.19); // read from behind, not mirrored
+             vec4 d = texture2D(uDecal, uv);
+             kit = mix(kit, d.rgb, d.a);
+           }
+           // fabric: a soft weave so the shirt never reads as flat paint
+           float weave = 0.96 + 0.04 * sin(vBind.y * 900.0) * sin(vBind.x * 900.0);
+           diffuseColor.rgb = kit * weave;
+         } else {
+           // skin: the character's texture tinted to the player's tone
+           float lum = dot(diffuseColor.rgb, vec3(0.299, 0.587, 0.114));
+           diffuseColor.rgb = mix(diffuseColor.rgb, uSkin * (0.55 + 0.9 * lum), 0.82);
+         }`,
+      )
+      .replace(
+        "#include <roughnessmap_fragment>",
+        `#include <roughnessmap_fragment>
+         roughnessFactor = mix(roughnessFactor, 0.78, kitMask);`,
       );
   };
-  mat.customProgramCacheKey = () => `matchcut-kit-${role}`;
+  mat.customProgramCacheKey = () => "matchcut-footballer-kit";
   return mat;
 }
 
-const SKINS = [0x8d5524, 0xc68642, 0xe0ac69, 0xf1c27d, 0x6b4423, 0x4a2c17, 0x3b2214];
+function nameplate(name, num, colour) {
+  const cv = document.createElement("canvas");
+  cv.width = 256;
+  cv.height = 256;
+  const c = cv.getContext("2d");
+  c.fillStyle = colour;
+  c.textAlign = "center";
+  c.textBaseline = "alphabetic";
+  c.font = "800 34px 'Big Shoulders Display', 'Arial Narrow', sans-serif";
+  c.fillText(String(name).toUpperCase(), 128, 236);
+  c.font = "900 170px 'Big Shoulders Display', 'Arial Narrow', sans-serif";
+  c.fillText(String(num), 128, 196);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.flipY = false;
+  return t;
+}
+
+// bind-pose frame of a body mesh: height range, width, and which way the face points
+function bodyFrame(geometry) {
+  geometry.computeBoundingBox();
+  const bb = geometry.boundingBox;
+  const pos = geometry.attributes.position;
+  const minY = bb.min.y;
+  const spanY = bb.max.y - bb.min.y;
+  let zSum = 0;
+  let n = 0;
+  for (let i = 0; i < pos.count; i += 3) {
+    if ((pos.getY(i) - minY) / spanY > 0.9) {
+      zSum += pos.getZ(i) - (bb.min.z + bb.max.z) / 2;
+      n++;
+    }
+  }
+  // the face (nose, brow) sits forward of the skull's centre
+  return {
+    minY, spanY, halfW: (bb.max.x - bb.min.x) / 2, centerX: (bb.min.x + bb.max.x) / 2,
+    front: n && zSum / n < 0 ? -1 : 1,
+  };
+}
+
+const SKINS = [0x5a3825, 0x8d5524, 0xc68642, 0xe0ac69, 0xf1c27d, 0x6b4423, 0x3d2416, 0xa87454];
+const HAIR_COLOURS = [0x1a1210, 0x2b1d14, 0x3b2a1f, 0x111111, 0x6a4a2f, 0xb08d57];
+const HAIRSTYLES = [["Hair_Buzzed"], ["Hair_SimpleParted"], ["Hair_Buzzed", "Hair_Beard"], ["Hair_Long"], ["Hair_Buns"], ["Hair_SimpleParted", "Hair_Beard"], ["Hair_BuzzedFemale"]];
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 
 export class Player {
-  constructor(lib, kit, { seed, keeper }) {
+  constructor(lib, kit, { seed, keeper, name = "", num = "" }) {
     this.lib = lib;
     this.keeper = keeper;
     this.root = new THREE.Group();
     const body = cloneSkinned(lib.scene);
     this.root.add(body);
-    let bounds = null;
-    body.traverse((o) => {
-      if (o.isSkinnedMesh && !bounds) {
-        o.geometry.computeBoundingBox();
-        bounds = o.geometry.boundingBox.clone();
-      }
-    });
     const colours = {
       shirt: kit.primary,
       trim: kit.secondary,
       shorts: kit.shorts ?? kit.secondary,
       socks: kit.socks ?? kit.primary,
-      skin: SKINS[seed % SKINS.length],
+      skin: SKINS[(seed * 5) % SKINS.length],
+      boots: [0x111111, 0xf4f4f4, 0x1e88e5, 0xff5722, 0x111111][seed % 5],
     };
+    this.numberColour = kit.number ?? kit.secondary;
+    this.decal = nameplate(name, num, this.numberColour);
+    const style = HAIRSTYLES[(seed * 3) % HAIRSTYLES.length];
+    const hairTint = new THREE.Color(HAIR_COLOURS[(seed * 7) % HAIR_COLOURS.length]);
     body.traverse((o) => {
-      if (!o.isSkinnedMesh) return;
-      const role = /joint/i.test(o.material?.name ?? o.name) ? "joints" : "body";
-      o.material = kitMaterial(o.material, colours, bounds, role);
+      if (!o.isMesh) return;
       o.castShadow = true;
-      o.frustumCulled = false;
+      o.frustumCulled = false; // skinned bounds lag the pose; 22 players are cheap to draw
+      if (/^HAIR_/.test(o.name)) {
+        const keep = style.some((h) => o.name.includes(h)) || /Eyebrows_Regular/.test(o.name);
+        o.visible = keep;
+        if (keep) {
+          o.material = o.material.clone();
+          o.material.color = hairTint.clone().multiplyScalar(2.2);
+        }
+      } else if (/SuperHero|Body|Surface/i.test(o.name) && o.isSkinnedMesh) {
+        o.material = kitMaterial(o.material, colours, bodyFrame(o.geometry), this.decal);
+      } else if (/Eyebrows/.test(o.name)) {
+        o.material = o.material.clone();
+        o.material.color = hairTint.clone().multiplyScalar(2.2);
+      }
     });
     // size from the skeleton, not the mesh: compressed meshes store normalised positions
     body.updateMatrixWorld(true);
@@ -109,16 +192,16 @@ export class Player {
       if (!o.isBone) return;
       o.getWorldPosition(p);
       if (/Head$/i.test(o.name)) headY = p.y;
-      if (/(Foot|Toe)/i.test(o.name)) footY = Math.min(footY, p.y);
+      if (/(foot|ball|toe)/i.test(o.name)) footY = Math.min(footY, p.y);
     });
-    const span = headY !== null && Number.isFinite(footY) ? (headY - footY) / 0.9 : null; // head bone sits ~10% below the crown
+    const span = headY !== null && Number.isFinite(footY) ? (headY - footY) / 0.9 : null; // the head bone sits ~10% below the crown
     if (span) body.scale.multiplyScalar(HEIGHT / span);
     body.updateMatrixWorld(true);
     let minY = Infinity;
     body.traverse((o) => {
-      if (o.isBone && /(Foot|Toe)/i.test(o.name)) minY = Math.min(minY, o.getWorldPosition(p).y);
+      if (o.isBone && /(foot|ball|toe)/i.test(o.name)) minY = Math.min(minY, o.getWorldPosition(p).y);
     });
-    if (Number.isFinite(minY)) body.position.y -= minY - 0.04; // soles on the turf
+    if (Number.isFinite(minY)) body.position.y -= minY - 0.03; // soles on the turf
     this.body = body;
     this.mixer = new THREE.AnimationMixer(body);
     const clip = (n) => lib.clips.get(n);
@@ -145,6 +228,18 @@ export class Player {
     this.heading = 0;
     this.speed = 0;
     this.current = null; // { action, start, contact, duration, face }
+  }
+
+  // a substitution puts a new player in this slot: new name and number on the shirt
+  setIdentity(name, num) {
+    if (this.identity === `${name}#${num}`) return;
+    this.identity = `${name}#${num}`;
+    const fresh = nameplate(name, num, this.numberColour);
+    this.body.traverse((o) => {
+      if (o.material?.userData?.kit) o.material.userData.kit.uDecal.value = fresh;
+    });
+    this.decal.dispose();
+    this.decal = fresh;
   }
 
   _action(name) {
