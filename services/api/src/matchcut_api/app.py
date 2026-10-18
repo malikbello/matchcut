@@ -136,6 +136,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        path = request.url.path
+        if not path.startswith(("/api/", "/media/")) and "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = (
+                "no-cache"  # Studio files revalidate, so a release is seen at once
+            )
         return response
 
     # added after the guard so it runs first and the session is ready for the routes

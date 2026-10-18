@@ -150,3 +150,13 @@ def test_spoken_lines_are_served_only_by_strict_name(settings):
     assert r.headers["content-type"] == "audio/mpeg"
     for bad in ("..%2F..%2Fsecret.mp3", "CU-00001-en-NG.wav", "notes.txt"):
         assert c.get(f"/media/audio/{MATCH}/{bad}").status_code == 404
+
+
+def test_studio_files_revalidate(settings, tmp_path):
+    studio = tmp_path / "studio"
+    studio.mkdir()
+    (studio / "index.html").write_text("<!doctype html><title>Studio</title>", encoding="utf-8")
+    settings.studio_dir = studio
+    r = TestClient(create_app(settings)).get("/")
+    assert r.status_code == 200
+    assert r.headers["cache-control"] == "no-cache"

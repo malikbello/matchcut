@@ -127,7 +127,8 @@ button.primary:hover { transform: translateY(-1px); }
 
 /* Arabic: its own typeface, and the card reads right to left (the pitch never mirrors) */
 :lang(ar) { font-family: 'IBM Plex Sans Arabic', var(--ui); }
-.cue-text:lang(ar), .timeline .x:lang(ar) { font: 700 clamp(18px, 2vw, 26px)/1.5 'IBM Plex Sans Arabic', var(--ui); letter-spacing: 0; }
+.cue-text:lang(ar) { font: 700 clamp(18px, 2vw, 26px)/1.5 'IBM Plex Sans Arabic', var(--ui); letter-spacing: 0; }
+.timeline .x:lang(ar) { font: 500 14px/1.5 'IBM Plex Sans Arabic', var(--ui); direction: rtl; text-align: right; }
 .cue[dir="rtl"] { grid-template-columns: 1fr auto; }
 .cue[dir="rtl"] .hero { order: 2; }
 .cue[dir="rtl"] .cue-body { padding: 14px 18px 14px 20px; }

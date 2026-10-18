@@ -18,6 +18,9 @@ const HERO = {
   momentum_swing: [["momentum", "momentum"]],
 };
 const RTL = new Set(["ar"]);
+// in right-to-left text a score like 1-0 would display as 0-1: keep scores and decimals as left-to-right runs
+const LRI = String.fromCharCode(0x2066), PDI = String.fromCharCode(0x2069);
+const isolateNumbers = (text, lang) => (RTL.has(lang) ? text.replace(/[0-9]+(?:[.,][0-9]+)?(?:-[0-9]+)?(?: ?xG)?/g, (m) => LRI + m + PDI) : text);
 const CUE_SECONDS = 7; // on screen for 7 s of wall time at any replay speed
 const PITCH = { L: 105, W: 68 };
 
@@ -161,7 +164,7 @@ function showCue(cue) {
   const [label, iconId] = KIND[cue.kind] || ["Moment", "i-chance"];
   $("cue-kind").textContent = `${cue.clock}  ${label}`;
   $("cue-icon").setAttribute("href", `#${iconId}`);
-  $("cue-text").textContent = cue.text;
+  $("cue-text").textContent = isolateNumbers(cue.text, cue.language);
   $("cue-text").lang = cue.language;
   box.dir = RTL.has(cue.language) ? "rtl" : "ltr";
   speak(cue);
@@ -194,7 +197,7 @@ function showEvidence() {
 }
 function addToTimeline(cue) {
   const li = el("li", { class: `${cue.status === "verified" ? "verified " : ""}${cue.kind}` });
-  li.append(el("span", { class: "t" }, cue.clock), icon((KIND[cue.kind] || [, "i-chance"])[1]), el("span", { class: "x", lang: cue.language }, cue.text));
+  li.append(el("span", { class: "t" }, cue.clock), icon((KIND[cue.kind] || [, "i-chance"])[1]), el("span", { class: "x", lang: cue.language }, isolateNumbers(cue.text, cue.language)));
   li.addEventListener("click", () => { seek(cue.t_ms - 4000); });
   $("timeline").prepend(li);
   $("rail-count").textContent = `${$("timeline").children.length} so far`;
