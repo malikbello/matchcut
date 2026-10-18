@@ -56,6 +56,7 @@
 | 17 Oct | Auto-eventing from video in scope; AI narration for the demo film |
 | 18 Oct | Show camera animation sources: Mixamo (football actions, raw files kept private, baked into the app, never in the public repo), CMU motion capture, Quaternius CC0; public repo falls back to CMU + Quaternius. Automatic Low/Medium/High quality with 2D fallback; High is the default and the demo standard |
 | 18 Oct | Five seasons with squad evolution; show camera (premium stylised 3D) approved; video-game quality on the roadmap |
+| 18 Oct | Voice and languages: live voiced commentary (British and Nigerian English, Arabic on Azure Speech); captions also in Yoruba, Hausa, Igbo and Nigerian Pidgin; their voices only if an open model passes licence and native listening checks |
 | 18 Oct | League Memory on MCP SDK 1.x, the range Agent Framework supports (ADR-0010) |
 | 18 Oct | Tactical-shift cards state what was measured ("pressing harder", PPDA before and after), not a coach's intent |
 | 18 Oct | Agent-based tracking-first engine (ADR-0002); Event Hubs backbone (ADR-0003); Container Apps + Jobs (ADR-0004); keyless security (ADR-0005); uv monorepo (ADR-0006) |
