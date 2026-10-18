@@ -29,7 +29,10 @@ Matchcut serves fans in their own language, starting with Nigerian fans and Arab
   - Arabic: `ar-SA-HamedNeural`; Spanish and Portuguese: national voices.
 - **Mood:** expressive voices speak with the moment's mood, set per language and kind of moment: joy for an English goal, a shout for a French goal, surprise for a big chance or a great save, calm for analysis. Classic voices have no styles and keep a brisk pace instead. Cost: MAI-Voice-2.1 is $22 and Flash $15 per million characters, under one US cent per match for every language.
 - **Cache:** each match's audio folder has a manifest of which voice and mood made each file, so changing a voice re-renders only those lines.
-- **Yoruba, Hausa and Igbo** are captions-only until a self-hosted **YarnGPT2** voice passes a native listening check. Its licence chain is clear: model Apache-2.0, WavTokenizer MIT, outetts Apache-2.0, uroman MIT-style with attribution. SoroTTS and Wayo GPT were rejected because their licences are non-commercial.
+- **Yoruba, Hausa and Igbo** are captions-only in this release; voices are planned for a later one.
+  - **YarnGPT2** (licence clear: model Apache-2.0, WavTokenizer MIT, outetts Apache-2.0, uroman MIT-style with attribution) was trialled on 18 Oct on real Matchcut lines. A native Yoruba listener found the Yoruba and Hausa too fast to make out. The trial also found that it strips tone marks before speaking, reads digits as English words, and runs about 25 times slower than real time on a laptop CPU (about 1.5 GB of memory).
+  - Also reviewed and set aside: Naija-TTS, a Chatterbox LoRA (MIT, but Yoruba character error rate 45% and GPU-bound); Meta MMS, SoroTTS and Wayo GPT (non-commercial licences); N-ATLaS (speech recognition, not synthesis, with a 1,000-user cap); paid APIs from Intron, Spitch and NaijaLingo (no public pricing).
+  - Before revisiting: spoken numbers written as words in each language, a football glossary for the Localiser, and a slower speaking rate, then another native listening check.
 - **Studio:**
   - each card speaks as it cuts in, with a commentary toggle;
   - Arabic cards read right to left in IBM Plex Sans Arabic, while the pitch never mirrors;
