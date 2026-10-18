@@ -38,8 +38,24 @@ for name, (rid, a, b, lufs, fi, fo) in STEMS.items():
     )
     target = out / f"{name}.mp3"
     subprocess.run(
-        [ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(src / f"{rid}.mp3"),
-         "-af", af, "-ac", "2", "-c:a", "libmp3lame", "-b:a", "128k", str(target)],
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            str(src / f"{rid}.mp3"),
+            "-af",
+            af,
+            "-ac",
+            "2",
+            "-c:a",
+            "libmp3lame",
+            "-b:a",
+            "128k",
+            str(target),
+        ],
         check=True,
     )
     print(f"{name:7s} {dur:5.1f}s -> {target.stat().st_size // 1024} KB")

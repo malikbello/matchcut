@@ -63,6 +63,7 @@ ignore = [
 "services/api/src/matchcut_api/app.py" = ["PLR0915"]                                # app factory: routes close over settings
 "docs/**" = ["E501", "E741"]                                          # diagram generator: drawing coordinates
 "research/voices/kaggle/**" = ["E501", "S603"]                        # standalone Kaggle scripts: embedded test lines, pip bootstrap
+"apps/studio/scripts/**" = ["E501", "N806", "RUF046", "S603"]        # asset tooling run in Blender and ffmpeg; matrix names follow maths (Ws, Wt)
 
 [tool.pyright]
 pythonVersion = "3.12"

@@ -158,7 +158,10 @@ export async function createShow({
   const players = feed.slots.map((clubId, slot) => {
     const side = clubId === feed.teams.home.id ? "home" : "away";
     const keeper = keepers.has(slot);
-    const p = new Player(lib, keeper ? gk[side] : feed.teams[side].kit, { seed: slot, keeper });
+    const who = feed.teams[side].players[String(slot)] ?? { name: "", num: "" };
+    const kit = keeper ? { ...gk[side], number: "#111111" } : feed.teams[side].kit;
+    const p = new Player(lib, kit, { seed: slot, keeper, name: who.name, num: who.num });
+    p.identity = `${who.name}#${who.num}`;
     p.root.visible = false;
     scene.add(p.root);
     return p;
@@ -265,9 +268,21 @@ export async function createShow({
     return { x, z, vx: splineVel(x0, xa, xb, x3, u, span) / 10, vz: splineVel(y0, ya, yb, y3, u, span) / 10, jump };
   }
 
+  // who wears each slot's shirt at time t (substitutions change it)
+  function identityAt(slot, t) {
+    const side = feed.slots[slot] === feed.teams.home.id ? "home" : "away";
+    let who = feed.teams[side].players[String(slot)] ?? null;
+    for (const ch of feed.changes ?? []) if (ch.slot === slot && ch.t <= t && ch.id) who = feed.players[ch.id];
+    return who;
+  }
+
   // the live (or replayed) match at time t
   function poseMatch(t, matchDt, snapAll) {
     placeBall(t);
+    for (const ch of feed.changes ?? []) {
+      const who = identityAt(ch.slot, t);
+      if (who) players[ch.slot].setIdentity(who.name, who.num);
+    }
     const cutNow = cuts.some((c) => lastCutCheck < c && c <= t);
     lastCutCheck = t;
     for (let slot = 0; slot < players.length; slot++) {

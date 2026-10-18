@@ -47,7 +47,7 @@ if rig.animation_data and rig.animation_data.action:
     rig.animation_data.action.name = "_bind"
 
 actions: dict[str, bpy.types.Action] = {}
-for f in sorted(list(clips_dir.glob("*.fbx"))):
+for f in sorted(clips_dir.glob("*.fbx")):
     objs = import_fbx(f)
     arm = next((o for o in objs if o.type == "ARMATURE"), None)
     act = arm.animation_data.action if arm and arm.animation_data else None
@@ -91,8 +91,8 @@ for name, act in actions.items():
     facing = []
     for fr in range(f0, f1 + 1):
         scene.frame_set(fr)
-        for b in track:
-            track[b].append(world(b).copy())
+        for b, pts in track.items():
+            pts.append(world(b).copy())
         # facing: the hips' forward axis projected on the ground
         m = rig.matrix_world @ rig.pose.bones["mixamorig:Hips"].matrix
         fwd = m.to_3x3() @ Vector((0, 0, 1))
@@ -119,7 +119,9 @@ for name, act in actions.items():
         "contact_bone": (best[1] or "").replace("mixamorig:", ""),
         "contact_speed": round(best[0], 2),
     }
-    print(f"{name:34s} {dur:5.2f}s speed {speed:4.2f} dir {rel:6.1f} contact {best[2] / fps:4.2f}s {meta[name]['contact_bone']}")
+    print(
+        f"{name:34s} {dur:5.2f}s speed {speed:4.2f} dir {rel:6.1f} contact {best[2] / fps:4.2f}s {meta[name]['contact_bone']}"
+    )
 
 # push every clip to its own NLA track so the exporter writes each as a named animation
 rig.animation_data.action = None

@@ -26,9 +26,9 @@ export const GEARS = [
 export const IDLE = { outfield: "offensive_idle", keeper: "goalkeeper_idle" };
 
 function stripRootMotion(clip) {
-  // keep the hips' height (crouches, dives) but remove travel on the ground plane
+  // keep the hips' height (crouches, dives) but remove travel on the ground plane (Mixamo: Hips, game rig: pelvis)
   for (const track of clip.tracks) {
-    if (!/Hips\.position$/.test(track.name)) continue;
+    if (!/(Hips|pelvis)\.position$/.test(track.name)) continue;
     const v = track.values;
     const x0 = v[0];
     const z0 = v[2];
