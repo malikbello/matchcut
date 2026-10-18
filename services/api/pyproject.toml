@@ -3,7 +3,14 @@ name = "matchcut-api"
 version = "0.1.0"
 description = "Matchcut API: access sessions, cue streams over Server-Sent Events, and the Studio screen."
 requires-python = ">=3.12"
-dependencies = ["matchcut-contracts", "fastapi>=0.120", "uvicorn>=0.40"]
+dependencies = [
+    "matchcut-contracts",
+    "fastapi>=0.120",
+    "uvicorn>=0.40",
+    "sse-starlette>=3.0",
+    "itsdangerous>=2.2",
+    "limits>=5.0",
+]
 
 [project.scripts]
 matchcut-api = "matchcut_api.app:main"

@@ -40,7 +40,7 @@
 | D7 | Sat 24 | Recap Factory + Analyst screens · 9:16 shareables · right to left + 5 languages · motion polish · security hardening · dashboards · docs [UX review against the brand board] |
 | D8 | Sun 25 | Curated demo match (storylines) · record and edit the video (Arcas narration, no music) · pitch text · README · judge guide [video < 2:00 confirmed by ffprobe] |
 | D9 | Mon 26 | Clean-clone test · final QA on the live URL · make the repo public · Malik submits by hand · re-read rules [**submitted**] |
-| — | Tue 27 | Buffer only |
+| Buffer | Tue 27 | Buffer only |
 
 ## 4. Cut list (in order, only if behind)
 1. A2A partner agent (stretch, not planned)

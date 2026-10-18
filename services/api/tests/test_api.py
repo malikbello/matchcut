@@ -1,8 +1,9 @@
+import gzip
 import time
 
 import pytest
 from fastapi.testclient import TestClient
-from matchcut_api import Settings, create_app, session_valid, sign_session
+from matchcut_api import Settings, create_app
 from matchcut_api.app import sha256
 from matchcut_contracts import Cue, CueStatus, MomentKind
 
@@ -28,6 +29,9 @@ def _cue(moment: int, lang: str, status: CueStatus, text: str, t_ms: int) -> Cue
 def settings(tmp_path):
     cues = tmp_path / "cues"
     cues.mkdir()
+    feeds = tmp_path / "feeds"
+    feeds.mkdir()
+    (feeds / f"{MATCH}.json.gz").write_bytes(gzip.compress(b'{"match_id": "kes-wcr-7", "t": [0]}'))
     lines = [
         _cue(1, "en", CueStatus.PLAIN, "51' GOAL - Quinouani. 1-0", 3_000),
         _cue(1, "en", CueStatus.VERIFIED, "Quinouani finishes a 0.92 chance: 1-0.", 3_000),
@@ -39,9 +43,10 @@ def settings(tmp_path):
     return Settings(
         cues_dir=cues,
         media_dir=tmp_path / "media",
+        feeds_dir=feeds,
         studio_dir=None,
         code_hashes=frozenset({sha256(CODE)}),
-        secret=b"x" * 32,
+        secret="x" * 32,
         requests_per_minute=50,
         secure_cookie=False,
     )
@@ -78,19 +83,26 @@ def test_wrong_code_is_refused_and_cookie_is_hardened(client):
     assert "samesite=strict" in cookie
 
 
-def test_sessions_are_signed_and_expire():
-    secret = b"s" * 32
-    token = sign_session(secret, now=1000.0)
-    assert session_valid(secret, token, now=1001.0)
-    assert not session_valid(secret, token, now=1000.0 + 13 * 3600)  # expired
-    assert not session_valid(b"t" * 32, token, now=1001.0)  # wrong key
-    assert not session_valid(secret, token[:-1] + ("0" if token[-1] != "0" else "1"), now=1001.0)  # tampered
-    assert not session_valid(secret, None)
+def test_tampered_or_expired_sessions_are_refused(settings, monkeypatch):
+    c = TestClient(create_app(settings))
+    _login(c)
+    assert c.get("/api/matches").status_code == 200
+    cookie = c.cookies.get("mc_session")
+    assert cookie
+    c.cookies.set("mc_session", cookie[:-2] + ("aa" if not cookie.endswith("aa") else "bb"))
+    assert c.get("/api/matches").status_code == 401  # signature no longer matches
+    _login(c)
+    monkeypatch.setattr("matchcut_api.app.time.time", lambda: 10**12)  # far past the 12-hour expiry
+    assert c.get("/api/matches").status_code == 401
 
 
 def test_verified_lines_replace_plain_cards_and_rejected_never_air(client):
     _login(client)
-    assert client.get("/api/matches").json() == [{"match_id": MATCH, "video": ""}]
+    assert client.get("/api/matches").json() == [
+        {"match_id": MATCH, "video": "", "feed": f"/api/matches/{MATCH}/feed"}
+    ]
+    assert client.get(f"/api/matches/{MATCH}/feed").json()["t"] == [0]  # served gzip, decoded by the client
+    assert client.get("/api/matches/abc-def-9/feed").status_code == 404
     en = client.get(f"/api/matches/{MATCH}/cues").json()
     assert [c["status"] for c in en] == ["verified", "plain"]
     assert "unverifiable" not in str(en)

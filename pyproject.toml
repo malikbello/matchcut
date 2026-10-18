@@ -27,9 +27,10 @@ dev = [
   "matchcut-sim",
   "matchcut-memory",
   "matchcut-renderer",
-  "matchcut-insights",
+  "matchcut-insights[evals]",
   "matchcut-api",
   "httpx>=0.28",
+  "common-data-format-validator>=0.1.1",
   "pytest>=8.3",
   "pytest-cov>=6.0",
   "hypothesis>=6.120",
@@ -55,6 +56,7 @@ ignore = [
 "**/tests/**" = ["S101", "PLR2004"]
 "services/sim/src/matchcut_sim/engine.py" = ["PLR0912", "PLR0915"]  # decision logic reads best as one function
 "services/sim/src/matchcut_sim/league.py" = ["E501"]                # club data table, one club per line
+"services/sim/src/matchcut_sim/cli.py" = ["PLR0915"]                # argparse wiring: one block per command
 "packages/analytics/src/matchcut_analytics/state.py" = ["PLR0912", "PLR0915"]    # one branch per event type
 "packages/analytics/src/matchcut_analytics/moments.py" = ["PLR0912"]               # one branch per event type
 "services/insights/src/matchcut_insights/plain.py" = ["PLR0912"]                    # one template per moment kind
