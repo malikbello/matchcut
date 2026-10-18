@@ -13,6 +13,7 @@ from pathlib import Path
 from matchcut_contracts.models import (
     SCHEMA_VERSION,
     Club,
+    Cue,
     MatchEvent,
     MatchMeta,
     Moment,
@@ -29,6 +30,7 @@ MODELS = {
     "tracking-frame": TrackingFrame,
     "truth-record": TruthRecord,
     "moment": Moment,
+    "cue": Cue,
 }
 
 DEFAULT_OUT = Path(__file__).resolve().parents[2] / "schemas"

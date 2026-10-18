@@ -3,10 +3,11 @@ name = "matchcut-memory"
 version = "0.1.0"
 description = "League Memory: five seasons of Harbour League history behind read-only, parameterised MCP tools."
 requires-python = ">=3.12"
-dependencies = ["matchcut-contracts", "matchcut-sim", "mcp>=1.2"]
+dependencies = ["matchcut-contracts", "matchcut-sim", "mcp>=1.24,<2"]
 
 [project.scripts]
 matchcut-memory = "matchcut_memory.server:main"
+matchcut-memory-build = "matchcut_memory.build:main"
 
 [build-system]
 requires = ["hatchling>=1.25"]

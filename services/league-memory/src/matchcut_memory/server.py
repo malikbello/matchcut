@@ -1,4 +1,4 @@
-"""League Memory MCP server (Model Context Protocol, official Python SDK v2).
+"""League Memory MCP server (Model Context Protocol, official Python SDK, FastMCP).
 
 Exposes only read-only, parameterised tools. Run locally over stdio:
     matchcut-memory --db data/league/memory.sqlite
@@ -12,11 +12,12 @@ import argparse
 import os
 from typing import Any
 
-from mcp.server.mcpserver import MCPServer
+from mcp.server.fastmcp import FastMCP
 
 from matchcut_memory.queries import LeagueMemory
 
-mcp = MCPServer("league-memory")
+# SDK 1.x: the range Microsoft Agent Framework supports (ADR-0010)
+mcp = FastMCP("league-memory")
 _memory: LeagueMemory | None = None
 
 
@@ -71,7 +72,8 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
     os.environ["LEAGUE_MEMORY_DB"] = args.db
     if args.http:
-        mcp.run(transport="streamable-http", host="0.0.0.0", port=args.port)  # noqa: S104 - container ingress
+        mcp.settings.host, mcp.settings.port = "0.0.0.0", args.port  # noqa: S104 - container ingress
+        mcp.run(transport="streamable-http")
     else:
         mcp.run(transport="stdio")
 

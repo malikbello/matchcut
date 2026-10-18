@@ -1,0 +1,183 @@
+{
+  "$defs": {
+    "CueStatus": {
+      "enum": [
+        "plain",
+        "verified",
+        "rejected"
+      ],
+      "title": "CueStatus",
+      "type": "string"
+    },
+    "Fact": {
+      "additionalProperties": false,
+      "description": "One citable fact, computed by code. Agents may only state what a fact says.",
+      "properties": {
+        "evidence_ids": {
+          "description": "Event, moment or history record IDs behind it",
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "fact_id": {
+          "description": "F-nnn from analytics; LM-<query id>.<n> from a League Memory answer",
+          "pattern": "^(F-\\d{3}|LM-[0-9a-f]{10}\\.\\d{1,2})$",
+          "title": "Fact Id",
+          "type": "string"
+        },
+        "label": {
+          "description": "What the value means, e.g. 'expected goals of the shot'",
+          "title": "Label",
+          "type": "string"
+        },
+        "source": {
+          "enum": [
+            "analytics",
+            "league_memory"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "integer"
+            },
+            {
+              "type": "string"
+            }
+          ],
+          "title": "Value"
+        }
+      },
+      "required": [
+        "fact_id",
+        "label",
+        "value",
+        "source"
+      ],
+      "title": "Fact",
+      "type": "object"
+    },
+    "MomentKind": {
+      "enum": [
+        "goal",
+        "big_chance",
+        "great_save",
+        "momentum_swing",
+        "press_surge",
+        "tactical_shift",
+        "speed_peak",
+        "card",
+        "substitution"
+      ],
+      "title": "MomentKind",
+      "type": "string"
+    }
+  },
+  "$id": "https://matchcut.dev/schemas/1.2.0/cue.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "A timed on-screen line for one moment, in one language.",
+  "properties": {
+    "checks": {
+      "additionalProperties": {
+        "type": "boolean"
+      },
+      "description": "Verifier results, one entry per check",
+      "title": "Checks",
+      "type": "object"
+    },
+    "cited_fact_ids": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Cited Fact Ids",
+      "type": "array"
+    },
+    "clock": {
+      "title": "Clock",
+      "type": "string"
+    },
+    "cue_id": {
+      "pattern": "^CU-\\d{5}-[a-z]{2}$",
+      "title": "Cue Id",
+      "type": "string"
+    },
+    "facts": {
+      "description": "The facts the line may draw on",
+      "items": {
+        "$ref": "#/$defs/Fact"
+      },
+      "title": "Facts",
+      "type": "array"
+    },
+    "kind": {
+      "$ref": "#/$defs/MomentKind"
+    },
+    "language": {
+      "pattern": "^[a-z]{2}$",
+      "title": "Language",
+      "type": "string"
+    },
+    "latency_ms": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Moment detected to cue ready",
+      "title": "Latency Ms"
+    },
+    "match_id": {
+      "title": "Match Id",
+      "type": "string"
+    },
+    "moment_id": {
+      "pattern": "^MO-\\d{5}$",
+      "title": "Moment Id",
+      "type": "string"
+    },
+    "schema_version": {
+      "default": "1.2.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "status": {
+      "$ref": "#/$defs/CueStatus"
+    },
+    "t_ms": {
+      "minimum": 0,
+      "title": "T Ms",
+      "type": "integer"
+    },
+    "text": {
+      "maxLength": 280,
+      "title": "Text",
+      "type": "string"
+    }
+  },
+  "required": [
+    "match_id",
+    "cue_id",
+    "moment_id",
+    "kind",
+    "t_ms",
+    "clock",
+    "language",
+    "status",
+    "text"
+  ],
+  "title": "Cue",
+  "type": "object"
+}
