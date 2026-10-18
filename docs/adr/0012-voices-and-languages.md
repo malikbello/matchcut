@@ -23,10 +23,12 @@ Matchcut serves fans in their own language, starting with Nigerian fans and Arab
   - SSML reads scores the way fans say them ("one nil", "uno a cero") and says "xG" and "PPDA" as letters, at a brisk broadcast pace.
   - Audio is generated once per cue and cached.
 - **Voices:**
-  - British English: `en-GB-RyanNeural`; Nigerian English: `en-NG-AbeoNeural`;
-  - Nigerian Pidgin: `en-NG-EzinneNeural`, which reads Pidgin text and is to be confirmed by native listening;
-  - Arabic: `ar-SA-HamedNeural`;
-  - Spanish, French and Portuguese: national voices.
+  - British English: `en-GB-Harry` on Microsoft MAI-Voice-2.1, chosen in a listening test on 18 Oct over the classic `en-GB-RyanNeural`, Emily (excited) and DragonHD Ollie. The live lane can use the same voice on MAI-Voice-2.1-Flash for lower latency.
+  - French: `fr-FR-Marc` on MAI-Voice-2.1 (chosen in the same test).
+  - Nigerian English: `en-NG-AbeoNeural`; Nigerian Pidgin: `en-NG-EzinneNeural`, which reads Pidgin text and is to be confirmed by native listening;
+  - Arabic: `ar-SA-HamedNeural`; Spanish and Portuguese: national voices.
+- **Mood:** expressive voices speak with the moment's mood, set per language and kind of moment: joy for an English goal, a shout for a French goal, surprise for a big chance or a great save, calm for analysis. Classic voices have no styles and keep a brisk pace instead. Cost: MAI-Voice-2.1 is $22 and Flash $15 per million characters, under one US cent per match for every language.
+- **Cache:** each match's audio folder has a manifest of which voice and mood made each file, so changing a voice re-renders only those lines.
 - **Yoruba, Hausa and Igbo** are captions-only until a self-hosted **YarnGPT2** voice passes a native listening check. Its licence chain is clear: model Apache-2.0, WavTokenizer MIT, outetts Apache-2.0, uroman MIT-style with attribution. SoroTTS and Wayo GPT were rejected because their licences are non-commercial.
 - **Studio:**
   - each card speaks as it cuts in, with a commentary toggle;
