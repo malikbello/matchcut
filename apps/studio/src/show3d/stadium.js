@@ -106,8 +106,8 @@ function crowd(count, kits) {
 export function buildStadium({ crowdCount, kits }) {
   const group = new THREE.Group();
   const placements = [
-    { len: L + 2 * GAP, pos: [0, -(W / 2 + GAP)], rot: Math.PI, roof: false }, // main stand: the gantry hangs here
-    { len: L + 2 * GAP, pos: [0, W / 2 + GAP], rot: 0 },
+    { len: L + 2 * GAP, pos: [0, -(W / 2 + GAP)], rot: Math.PI },
+    { len: L + 2 * GAP, pos: [0, W / 2 + GAP], rot: 0, roof: false }, // main stand: the gantry hangs here
     { len: W + 2 * GAP, pos: [-(L / 2 + GAP), 0], rot: -Math.PI / 2 },
     { len: W + 2 * GAP, pos: [L / 2 + GAP, 0], rot: Math.PI / 2 },
   ];

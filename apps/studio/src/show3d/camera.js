@@ -13,7 +13,7 @@ export class Director {
     this.camera = camera;
     this.mode = "broadcast";
     this.look = new THREE.Vector3(0, 0, 0);
-    this.pos = new THREE.Vector3(0, 21, -(W / 2 + 19));
+    this.pos = new THREE.Vector3(0, 21, W / 2 + 19);
     this.fov = 30;
   }
 
@@ -21,30 +21,44 @@ export class Director {
     this.mode = mode;
   }
 
+  // a hard cut: the next frame jumps straight to the new shot, as a vision mixer does
+  cut() {
+    this.snap = true;
+  }
+
+  // replays keep the behind-goal camera on the goal that was scored in, wherever the ball is
+  lockGoal(side) {
+    this.goalSide = side;
+  }
+
   update(ball, dt) {
+    if (this.snap) {
+      dt = 1e3;
+      this.snap = false;
+    }
     const bx = THREE.MathUtils.clamp(ball.x, -L / 2, L / 2);
     const bz = THREE.MathUtils.clamp(ball.z, -W / 2, W / 2);
     let pos;
     let look;
     let fov;
     if (this.mode === "tactical") {
-      pos = new THREE.Vector3(bx * 0.35, 62, -(W / 2 + 58));
-      look = new THREE.Vector3(bx * 0.4, 0, 2);
+      pos = new THREE.Vector3(bx * 0.35, 62, W / 2 + 58);
+      look = new THREE.Vector3(bx * 0.4, 0, -2);
       fov = 42;
     } else if (this.mode === "tight") {
       // the close camera on the ball, from the main-stand side like a handheld touchline camera
-      pos = new THREE.Vector3(ball.x - 3, 5.5, ball.z - 15);
+      pos = new THREE.Vector3(ball.x - 3, 5.5, ball.z + 15);
       look = new THREE.Vector3(ball.x, 0.9, ball.z);
       fov = 34;
     } else if (this.mode === "goal") {
-      const side = bx >= 0 ? 1 : -1;
+      const side = this.goalSide ?? (bx >= 0 ? 1 : -1);
       pos = new THREE.Vector3(side * (L / 2 + 16), 7, bz * 0.25);
       look = new THREE.Vector3(side * (L / 2 - 18), 1, bz * 0.6);
       fov = 38;
     } else {
       // gantry: pans with the ball, tightens near the boxes, stays wide in midfield
-      pos = new THREE.Vector3(bx * 0.55, 21, -(W / 2 + 19)); // gantry under the main stand roof
-      look = new THREE.Vector3(bx * 0.92, 0, bz * 0.55 + 2);
+      pos = new THREE.Vector3(bx * 0.55, 21, W / 2 + 19); // gantry in the main stand, on the touchline at the bottom of the 2D view
+      look = new THREE.Vector3(bx * 0.92, 0, bz * 0.55 - 2);
       fov = THREE.MathUtils.lerp(26, 18, Math.min(1, Math.abs(bx) / (L / 2)));
     }
     this.pos.x = spring(this.pos.x, pos.x, 2.2, dt);

@@ -1,0 +1,8 @@
+Crowd stems for the Matchcut Studio, cut and loudness-normalised by apps/studio/scripts/crowd_stems.py from these recordings (all CC0 1.0, public domain, via Freesound):
+
+- 19 Football Crowd - Reaction To Goal.flac by D.jones (https://freesound.org/people/D.jones/sounds/528799/), licence: https://creativecommons.org/publicdomain/zero/1.0
+- Crowd screaming GOAL during the soccer game Mexico-Holland (Fifa world cup 2014) by felix.blume (https://freesound.org/people/felix.blume/sounds/241630/), licence: https://creativecommons.org/publicdomain/zero/1.0
+- CRWDReac-SOCCER_Millerntor Stadium Crowd Reaction Goal 01_PHILIPP FEIT_FCSP 29.546_Sound Of Sankt Pauli by itmightgetloud (https://freesound.org/people/itmightgetloud/sounds/829455/), licence: https://creativecommons.org/publicdomain/zero/1.0
+- stadium crowd sing by AxelTheCocker02 (https://freesound.org/people/AxelTheCocker02/sounds/733614/), licence: https://creativecommons.org/publicdomain/zero/1.0
+
+Thank you to the recordists.
