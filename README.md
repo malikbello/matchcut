@@ -36,7 +36,7 @@ Sign in with an Entra ID account that has *Cognitive Services OpenAI User* on th
 export AZURE_OPENAI_ENDPOINT=https://<your-foundry-resource>.cognitiveservices.azure.com/
 export AZURE_OPENAI_MODEL=gpt-5-mini
 uv run matchcut-insights run --home kes --away wcr --seed 7     # verified cues -> out/insights/kes-wcr-7.jsonl
-uv sync --extra evals                                           # Azure AI Evaluation (eval runs only)
+uv sync --all-packages --extra evals                            # Azure AI Evaluation (eval runs only)
 uv run matchcut-insights eval --matches 2 --judges             # scorecard + Azure AI Evaluation -> reports/insights-eval.md
 ```
 
