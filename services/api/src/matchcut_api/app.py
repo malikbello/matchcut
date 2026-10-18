@@ -1,13 +1,15 @@
 """Matchcut API: access sessions, cue streams over SSE, and the Studio screen.
 
-- ``POST /api/session`` exchanges a judge/fan access code for a signed, HttpOnly,
-  SameSite=Strict session cookie (EventSource cannot send headers, and codes must
-  never sit in URLs or logs).
+- ``POST /api/session`` exchanges an access code for a signed, HttpOnly,
+  SameSite=Strict session cookie (Starlette ``SessionMiddleware``). EventSource
+  cannot send headers, and codes must never sit in URLs or logs.
 - ``GET /api/matches`` lists matches with cues.
 - ``GET /api/matches/{id}/cues`` returns all cues for one language (for seeking).
-- ``GET /api/matches/{id}/stream`` replays cues as Server-Sent Events on match time.
-  The live lane feeds the same stream from Event Hubs.
-Every response carries strict security headers; each client is rate limited.
+- ``GET /api/matches/{id}/stream`` replays cues as Server-Sent Events on match time
+  (``sse-starlette``: keep-alive pings, disconnect handling). The live lane feeds
+  the same stream from Event Hubs.
+Every response carries strict security headers. Clients are rate limited with the
+``limits`` library (moving window; in-memory now, Redis when scaled out).
 """
 
 from __future__ import annotations
@@ -20,24 +22,29 @@ import os
 import re
 import secrets
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from limits import parse
+from limits.storage import MemoryStorage
+from limits.strategies import MovingWindowRateLimiter
 from matchcut_contracts import Cue, CueStatus
 from pydantic import BaseModel, Field
+from sse_starlette.sse import EventSourceResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
 LANG = re.compile(r"^[a-z]{2}$")
 COOKIE = "mc_session"
 SESSION_TTL_S = 12 * 3600
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; "
-    "font-src https://fonts.gstatic.com; img-src 'self' data:; media-src 'self' blob:; "
+    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; "
+    "img-src 'self' data:; media-src 'self' blob:; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 )
 
@@ -46,9 +53,10 @@ CSP = (
 class Settings:
     cues_dir: Path
     media_dir: Path
+    feeds_dir: Path
     studio_dir: Path | None
     code_hashes: frozenset[str]
-    secret: bytes
+    secret: str
     requests_per_minute: int = 120
     streams_per_client: int = 3
     secure_cookie: bool = True
@@ -60,55 +68,16 @@ class Settings:
         return cls(
             cues_dir=Path(os.environ.get("MATCHCUT_CUES_DIR", "out/insights")),
             media_dir=Path(os.environ.get("MATCHCUT_MEDIA_DIR", "out/media")),
+            feeds_dir=Path(os.environ.get("MATCHCUT_FEEDS_DIR", "out/feeds")),
             studio_dir=Path(studio) if studio and Path(studio).is_dir() else None,
             code_hashes=frozenset(h.strip().lower() for h in codes.split(",") if h.strip()),
-            secret=os.environ.get("MATCHCUT_SESSION_SECRET", "").encode() or secrets.token_bytes(32),
+            secret=os.environ.get("MATCHCUT_SESSION_SECRET") or secrets.token_urlsafe(32),
             secure_cookie=os.environ.get("MATCHCUT_INSECURE_COOKIE") != "1",
         )
 
 
 def sha256(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
-
-
-# ---------------------------------------------------------------- sessions
-
-
-def sign_session(secret: bytes, now: float | None = None) -> str:
-    expires = int((now or time.time()) + SESSION_TTL_S)
-    nonce = secrets.token_hex(8)
-    body = f"{expires}.{nonce}"
-    mac = hmac.new(secret, body.encode(), hashlib.sha256).hexdigest()
-    return f"{body}.{mac}"
-
-
-def session_valid(secret: bytes, token: str | None, now: float | None = None) -> bool:
-    if not token or token.count(".") != 2:
-        return False
-    expires, nonce, mac = token.split(".")
-    good = hmac.new(secret, f"{expires}.{nonce}".encode(), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(mac, good) and expires.isdigit() and int(expires) > (now or time.time())
-
-
-# ---------------------------------------------------------------- rate limits
-
-
-@dataclass
-class Limiter:
-    per_minute: int
-    max_streams: int
-    hits: dict[str, deque[float]] = field(default_factory=lambda: defaultdict(deque))
-    streams: dict[str, int] = field(default_factory=lambda: defaultdict(int))
-
-    def allow(self, client: str, now: float | None = None) -> bool:
-        t = now or time.monotonic()
-        q = self.hits[client]
-        while q and t - q[0] > 60:
-            q.popleft()
-        if len(q) >= self.per_minute:
-            return False
-        q.append(t)
-        return True
 
 
 def client_id(request: Request) -> str:
@@ -150,12 +119,14 @@ class SessionRequest(BaseModel):
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     s = settings or Settings.from_env()
-    limiter = Limiter(s.requests_per_minute, s.streams_per_client)
-    app = FastAPI(title="Matchcut API", version="0.1.0", docs_url=None, redoc_url=None, openapi_url=None)
+    limiter = MovingWindowRateLimiter(MemoryStorage())
+    per_client = parse(f"{s.requests_per_minute}/minute")
+    open_streams: dict[str, int] = defaultdict(int)
+    app = FastAPI(title="Matchcut API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
 
     @app.middleware("http")
     async def guard(request: Request, call_next):  # type: ignore[no-untyped-def]
-        if request.url.path.startswith("/api/") and not limiter.allow(client_id(request)):
+        if request.url.path.startswith("/api/") and not limiter.hit(per_client, client_id(request)):
             return JSONResponse({"detail": "rate limit"}, status_code=429, headers={"Retry-After": "60"})
         response: Response = await call_next(request)
         response.headers["Content-Security-Policy"] = CSP
@@ -166,8 +137,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         return response
 
+    # added after the guard so it runs first and the session is ready for the routes
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=s.secret,
+        session_cookie=COOKIE,
+        max_age=SESSION_TTL_S,
+        same_site="strict",
+        https_only=s.secure_cookie,
+    )
+
     def require_session(request: Request) -> None:
-        if not session_valid(s.secret, request.cookies.get(COOKIE)):
+        if not request.session.get("granted") or request.session.get("exp", 0) < time.time():
             raise HTTPException(401, "access code required")
 
     @app.get("/healthz")
@@ -175,18 +156,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/api/session")
-    def open_session(body: SessionRequest, response: Response) -> dict[str, bool]:
+    def open_session(body: SessionRequest, request: Request) -> dict[str, bool]:
         if not s.code_hashes or not any(hmac.compare_digest(sha256(body.code), h) for h in s.code_hashes):
             raise HTTPException(401, "invalid access code")
-        response.set_cookie(
-            COOKIE,
-            sign_session(s.secret),
-            max_age=SESSION_TTL_S,
-            httponly=True,
-            secure=s.secure_cookie,
-            samesite="strict",
-            path="/",
-        )
+        request.session.clear()
+        request.session.update({"granted": True, "exp": int(time.time()) + SESSION_TTL_S})
         return {"ok": True}
 
     @app.get("/api/matches", dependencies=[Depends(require_session)])
@@ -197,10 +171,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for p in sorted(s.cues_dir.glob("*.jsonl")):
             if MATCH_ID.match(p.stem):
                 media = s.media_dir / p.stem / "clip.mp4"
+                has_feed = (s.feeds_dir / f"{p.stem}.json.gz").is_file()
                 out.append(
-                    {"match_id": p.stem, "video": f"/media/{p.stem}/clip.mp4" if media.is_file() else ""}
+                    {
+                        "match_id": p.stem,
+                        "video": f"/media/{p.stem}/clip.mp4" if media.is_file() else "",
+                        "feed": f"/api/matches/{p.stem}/feed" if has_feed else "",
+                    }
                 )
         return out
+
+    @app.get("/api/matches/{match_id}/feed", dependencies=[Depends(require_session)])
+    def feed(match_id: str) -> Response:
+        """The 5 Hz positions feed, served pre-compressed."""
+        path = s.feeds_dir / f"{match_id}.json.gz"
+        if not MATCH_ID.match(match_id) or not path.is_file():
+            raise HTTPException(404, "not found")
+        return Response(
+            path.read_bytes(),
+            media_type="application/json",
+            headers={"Content-Encoding": "gzip", "Cache-Control": "private, no-cache"},
+        )
 
     @app.get("/api/matches/{match_id}/cues", dependencies=[Depends(require_session)])
     def cues(match_id: str, lang: str = "en") -> list[dict]:
@@ -211,33 +202,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         all_cues = [c for c in load_cues(s, match_id, lang) if c.t_ms >= from_ms]
         speed = min(max(speed, 0.25), 60.0)
         who = client_id(request)
-        if limiter.streams[who] >= limiter.max_streams:
+        if open_streams[who] >= s.streams_per_client:
             raise HTTPException(429, "too many open streams")
-        limiter.streams[who] += 1
+        open_streams[who] += 1
 
-        async def events() -> AsyncIterator[str]:
+        async def events() -> AsyncIterator[dict[str, str]]:
             try:
-                yield "retry: 3000\n\n"
-                start, last_beat = time.monotonic(), time.monotonic()
+                start = time.monotonic()
                 for c in all_cues:
-                    due = start + (c.t_ms - from_ms) / 1000 / speed
-                    while (wait := due - time.monotonic()) > 0:
-                        if await request.is_disconnected():
-                            return
-                        await asyncio.sleep(min(wait, 1.0))
-                        if time.monotonic() - last_beat > 15:
-                            last_beat = time.monotonic()
-                            yield ": keep-alive\n\n"
-                    yield f"id: {c.cue_id}\nevent: cue\ndata: {c.model_dump_json()}\n\n"
-                yield "event: end\ndata: {}\n\n"
+                    wait = start + (c.t_ms - from_ms) / 1000 / speed - time.monotonic()
+                    if wait > 0:
+                        await asyncio.sleep(wait)
+                    yield {"event": "cue", "id": c.cue_id, "data": c.model_dump_json()}
+                yield {"event": "end", "data": "{}"}
             finally:
-                limiter.streams[who] -= 1
+                open_streams[who] -= 1
 
-        return StreamingResponse(
-            events(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
-        )
+        return EventSourceResponse(events(), ping=15, headers={"Cache-Control": "no-store"})
 
     @app.get("/media/{match_id}/clip.mp4", dependencies=[Depends(require_session)])
     def media(match_id: str) -> FileResponse:

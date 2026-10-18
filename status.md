@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D3 complete (branch `d3/insights`)
+**Updated:** Sun 18 Oct 2026 · **Phase:** D3.1 (mature stack and Studio v1) in review
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -19,6 +19,16 @@
 - D2 merged (#3). D3 PR open from `d3/insights`; merge on green CI.
 - Next: D4 (3D show camera with quality tiers + vision lane). First steps: Poly Haven CC0 textures; Blender retarget pipeline (Mixamo private, Quaternius CC0, CMU) onto one rig; Three.js scene.
 - Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 and CMU soccer mocap in `assets-cc0/`. Blender installed.
+
+## Done in D3.1 (18 Oct): adopt proven components, Studio v1 (ADR-0011)
+- Agents run as a Microsoft Agent Framework workflow; OpenTelemetry tracing to Application Insights (off unless configured).
+- Attributed numbers: the Writer lists each number with its fact; the Verifier checks every pairing. House style bans em dashes (also a CI guard).
+- Verifier red team: 709 of 709 planted false lines caught, 0 of 128 true lines rejected (`reports/verifier-redteam.md`).
+- Live scorecard with Azure AI Evaluation: 88% verified, groundedness 4.57 of 5, relevance 3.93 of 5, about $0.005 per moment (`reports/insights-eval.md`).
+- API on standard libraries: Starlette sessions, `limits`, `sse-starlette`; positions feed served pre-compressed; CSP now `'self'` only.
+- CDF v0.3.2 export, validated in CI by the official validator (strict).
+- Studio v1: event-driven score bug with possession line, live 2D data pitch (the show camera's fallback tier), one match clock with scrubber and team-coloured markers, hero-number lower third, Verified stamp, evidence panel, custom icon set, self-hosted fonts.
+- Open: confirm the Studio frame rate on a real laptop GPU (the headless test browser renders at about 1.5 fps on any painting page).
 
 ## Done in D3 (18 Oct)
 - **Contracts 1.2.0:** `Fact` and `Cue` (verification status, checks, latency).

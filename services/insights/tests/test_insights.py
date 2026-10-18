@@ -16,7 +16,17 @@ from matchcut_insights import (
     verify_line,
     verify_translation,
 )
-from matchcut_insights.brain import AnalystNote, HistoryClaim, HistoryNote, Line, NotePoint, Translation
+from matchcut_insights.brain import (
+    AnalystNote,
+    HistoryClaim,
+    HistoryNote,
+    Line,
+    NotePoint,
+    NumberRef,
+    Translation,
+)
+from matchcut_insights.redteam import ATTACKS, red_team, report_markdown
+from matchcut_insights.telemetry import configure_telemetry
 from matchcut_sim import build_league, simulate_match
 from matchcut_sim.cli import replay_analytics
 
@@ -121,6 +131,7 @@ def test_grounded_line_passes():
         ("Okafor scores.", [], "cites_at_least_one_fact"),
         ("Okafor scores and the odds collapse.", ["F-002"], "clean_language"),
         ("Okafor " + "really " * 30 + "scores.", ["F-002"], "length_ok"),
+        ("Okafor " + chr(0x2014) + " what a finish.", ["F-002"], "house_style"),
     ],
 )
 def test_verifier_catches_each_failure(text, cited, failed):
@@ -128,6 +139,33 @@ def test_verifier_catches_each_failure(text, cited, failed):
     assert not v.passed
     assert v.checks[failed] is False
     assert v.problems
+
+
+def test_each_number_must_come_from_the_fact_it_is_attributed_to():
+    facts = [
+        Fact(fact_id="F-001", label="match minute", value=5, source="analytics"),
+        Fact(fact_id="F-002", label="Ironvale shots", value=3, source="analytics"),
+    ]
+    good = [("3", "F-002"), ("5", "F-001")]
+    assert verify_line(
+        "Ironvale have 3 shots after 5 minutes.", ["F-001", "F-002"], facts, NAMES, good
+    ).passed
+    # 5 is a real fact (the minute) but not the shot count: caught
+    nudged = verify_line("Ironvale have 5 shots after 5 minutes.", ["F-001", "F-002"], facts, NAMES, good)
+    assert not nudged.checks["numbers_attributed"]
+    swapped = verify_line("Ironvale have 5 shots after 3 minutes.", ["F-001", "F-002"], facts, NAMES, good)
+    assert not swapped.checks["numbers_attributed"]
+    wrong_owner = [("5", "F-002"), ("5", "F-001")]
+    assert not verify_line(
+        "Ironvale have 5 shots after 5 minutes.", ["F-001", "F-002"], facts, NAMES, wrong_owner
+    ).passed
+
+
+def test_a_score_can_be_attributed_as_one_value():
+    facts = [Fact(fact_id="F-004", label="score, Kestrel first", value="2-1", source="analytics")]
+    assert verify_line("It is 2-1.", ["F-004"], facts, NAMES, [("2-1", "F-004")]).passed
+    flipped = verify_line("It is 1-2.", ["F-004"], facts, NAMES, [("2-1", "F-004")])
+    assert not flipped.checks["numbers_attributed"]
 
 
 def test_numbers_from_a_cited_label_are_allowed():
@@ -219,6 +257,7 @@ def _good_line(match) -> Line:
     return Line(
         text=f"{player.value} delivers in minute {minute.value}.",
         cited_fact_ids=[minute.fact_id, player.fact_id],
+        numbers=[NumberRef(text=str(minute.value), fact_id=minute.fact_id)],
     )
 
 
@@ -273,7 +312,11 @@ def test_grounded_history_becomes_citable(match):
     mo, snap = _goal(match)
     player = ctx.players[mo.player_id].known_as
     history = HistoryNote(claims=[HistoryClaim(label="career goals with this one", value=50, query_id=QID)])
-    line = Line(text=f"{player} brings up 50 career goals.", cited_fact_ids=[f"{QID}.1", "F-005"])
+    line = Line(
+        text=f"{player} brings up 50 career goals.",
+        cited_fact_ids=[f"{QID}.1", "F-005"],
+        numbers=[NumberRef(text="50", fact_id=f"{QID}.1")],
+    )
     facts = build_facts(mo, snap, ctx)
     line.cited_fact_ids[1] = _fact(facts, "player involved").fact_id
     cues, report = _run(ScriptedBrain([line], history=history, raw=[ANSWER]), match, languages=())
@@ -337,3 +380,27 @@ def test_top_keeps_the_most_important_moments_in_time_order(match):
     assert cli._top(found, None) == found
     assert cli._pct([], 0.95) == 0.0
     assert cli._pct([1.0, 2.0, 3.0], 0.5) == 2.0
+
+
+def test_telemetry_is_off_without_a_connection_string(monkeypatch):
+    monkeypatch.delenv("APPLICATIONINSIGHTS_CONNECTION_STRING", raising=False)
+    assert configure_telemetry("matchcut-test") is False
+
+
+def test_red_team_catches_every_planted_error_and_passes_true_lines(match):
+    ctx, found = match
+    result = red_team(found, ctx)
+    assert result.true_lines >= len(found)
+    assert result.false_rejection_rate == 0.0, result.misses
+    assert result.catch_rate == 1.0, result.misses
+    assert set(result.attacks) <= set(ATTACKS)
+    assert "Caught 100.0%" in report_markdown(result, 1)
+
+
+def test_momentum_swings_keep_their_plain_card(match):
+    ctx, found = match
+    mo, snap = found[0]
+    swing = mo.model_copy(update={"kind": MomentKind.MOMENTUM_SWING, "importance": 0.9})
+    cues, report = asyncio.run(InsightsPipeline(ScriptedBrain([_good_line(match)]), ctx).process(swing, snap))
+    assert not report.ai_attempted
+    assert [c.status for c in cues] == [CueStatus.PLAIN]

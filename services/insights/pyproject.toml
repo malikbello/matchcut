@@ -10,6 +10,7 @@ dependencies = [
     "agent-framework-core==1.22.0",
     "agent-framework-openai>=1.17,<2",
     "azure-identity>=1.26",
+    "azure-monitor-opentelemetry>=1.6",
 ]
 
 [project.scripts]
@@ -21,3 +22,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/matchcut_insights"]
+
+[project.optional-dependencies]
+# Microsoft's model-graded evaluators for the eval command; not needed in production containers
+evals = ["azure-ai-evaluation>=1.18"]
