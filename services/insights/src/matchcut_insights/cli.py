@@ -27,6 +27,7 @@ from matchcut_insights.facts import MatchContext
 from matchcut_insights.pipeline import InsightsPipeline, MomentReport
 from matchcut_insights.redteam import red_team, report_markdown
 from matchcut_insights.telemetry import configure_telemetry
+from matchcut_insights.voice import AzureSpeech, voice_cues
 
 # list price per 1M tokens for gpt-5-mini Global Standard, USD (input, output); for the cost estimate
 PRICE_PER_M = (0.25, 2.00)
@@ -85,6 +86,9 @@ async def cmd_run(args: argparse.Namespace) -> None:
         cues, reports = await run_match(
             brain, ctx, moments, args.languages.split(",") if args.languages else []
         )
+    if args.voice:
+        voiced = voice_cues(cues, AzureSpeech.from_env(), args.media)
+        print(f"voiced {voiced} verified lines -> {args.media}/audio")
     out = Path(args.out or f"out/insights/{moments[0][0].match_id if moments else 'empty'}.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text("".join(c.model_dump_json() + "\n" for c in cues), encoding="utf-8")
@@ -235,7 +239,9 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--away", required=True)
     r.add_argument("--seed", type=int, default=7)
     r.add_argument("--memory-db", default="data/league/memory.sqlite")
-    r.add_argument("--languages", default="es,fr,pt")
+    r.add_argument("--languages", default="en-NG,pcm,yo,ha,ig,ar,es,fr,pt")
+    r.add_argument("--voice", action="store_true", help="voice verified lines with Azure AI Speech")
+    r.add_argument("--media", default="out/media")
     r.add_argument("--max-moments", type=int, default=12)
     r.add_argument("--out")
     r.add_argument("--verbose", action="store_true")

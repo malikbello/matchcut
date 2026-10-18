@@ -141,9 +141,24 @@ def history_facts(
     return accepted, rejected
 
 
+def _as_number(x: Any) -> float | None:
+    if isinstance(x, bool):
+        return None
+    if isinstance(x, int | float):
+        return float(x)
+    if isinstance(x, str):
+        try:
+            return float(x.strip())
+        except ValueError:
+            return None
+    return None
+
+
 def _same(a: Any, b: Any) -> bool:
+    """Equal values match whatever their type: a claim of '35' grounds against an answer of 35."""
     if isinstance(a, bool) or isinstance(b, bool):
         return a is b
-    if isinstance(a, int | float) and isinstance(b, int | float):
-        return abs(float(a) - float(b)) < 1e-9
+    na, nb = _as_number(a), _as_number(b)
+    if na is not None and nb is not None:
+        return abs(na - nb) < 1e-9
     return isinstance(a, str) and isinstance(b, str) and a.strip().lower() == b.strip().lower()

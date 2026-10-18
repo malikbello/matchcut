@@ -1,10 +1,12 @@
 """The insights pipeline for one moment.
 
 1. Code builds the fact sheet and a plain card airs at once.
-2. The Agent Framework workflow (see ``workflow.py``) runs Analyst and Historian
-   in parallel (Historian claims grounded against the League Memory answers
-   actually received), then the Writer and the deterministic Verifier, with one
-   revision on feedback, then the Localiser with re-checked translations.
+2. Decision stage, the Agent Framework workflow (``workflow.py``): Analyst and
+   Historian in parallel (Historian claims grounded against the League Memory
+   answers actually received), then the Writer and the deterministic Verifier,
+   with one revision on feedback. The verified English line is kept at once.
+3. Localisation stage: languages in parallel batches, each translation
+   re-checked for numbers, names and house style.
 Any model error or timeout leaves the plain card on air: the screen never waits on AI.
 """
 
@@ -20,13 +22,17 @@ from matchcut_contracts import Cue, CueStatus, Fact, Moment, MomentKind
 
 from matchcut_insights.brain import Brain
 from matchcut_insights.facts import MatchContext, build_facts
+from matchcut_insights.languages import canonical
 from matchcut_insights.plain import plain_card
+from matchcut_insights.verify import verify_translation
 from matchcut_insights.workflow import MomentJob, Outcome, build_workflow
 
 AI_MIN_IMPORTANCE = 0.4  # lower-weight moments keep their plain card (cost and screen time)
 # an abstract index reads better as a plain card ("Momentum swings to ...") than as prose
 PLAIN_ONLY = frozenset({MomentKind.MOMENTUM_SWING})
-MOMENT_TIMEOUT_S = 30.0
+MOMENT_TIMEOUT_S = 30.0  # stage 1: the verified English line
+TRANSLATE_TIMEOUT_S = 45.0  # stage 2: all languages, after the English line
+TRANSLATE_BATCH = 3  # languages per Localiser call, run in parallel
 
 
 @dataclass
@@ -54,6 +60,7 @@ class InsightsPipeline:
     languages: Sequence[str] = ("es", "fr", "pt")
     min_importance: float = AI_MIN_IMPORTANCE
     timeout_s: float = MOMENT_TIMEOUT_S
+    translate_timeout_s: float = TRANSLATE_TIMEOUT_S
 
     def _cue(
         self,
@@ -92,68 +99,84 @@ class InsightsPipeline:
             return cues, report
         report.ai_attempted = True
         try:
-            cues += await asyncio.wait_for(self._ai(moment, facts, report, start), self.timeout_s)
+            english = await asyncio.wait_for(self._decide(moment, facts, report, start), self.timeout_s)
         except TimeoutError:
             report.error = f"timed out after {self.timeout_s:.0f} s"
+            return cues, report
         except Exception as exc:  # a model failure must never take the screen down
             report.error = f"{type(exc).__name__}: {exc}"[:300]
+            return cues, report
+        cues.append(english)
+        if english.status == CueStatus.VERIFIED and self.languages:
+            try:  # translations follow the English line; a slow language never costs it
+                cues += await asyncio.wait_for(
+                    self._localise(moment, english, report, start), self.translate_timeout_s
+                )
+            except TimeoutError:
+                report.error = f"translations timed out after {self.translate_timeout_s:.0f} s"
+            except Exception as exc:
+                report.error = f"translations: {type(exc).__name__}: {exc}"[:300]
         return cues, report
 
-    async def _ai(self, moment: Moment, facts: list[Fact], report: MomentReport, start: float) -> list[Cue]:
+    async def _decide(self, moment: Moment, facts: list[Fact], report: MomentReport, start: float) -> Cue:
+        """Stage 1, the Agent Framework workflow: Analyst and Historian, Writer, Verifier."""
         job = MomentJob(moment, facts)
-        workflow = build_workflow(self.brain, self.ctx, list(self.languages), job)
-        result = await workflow.run(job)
+        result = await build_workflow(self.brain, self.ctx, job).run(job)
         outcome = next(o for o in result.get_outputs() if isinstance(o, Outcome))
-        draft, verdict = outcome.draft, outcome.verdict
+        draft, verdict, line = outcome.draft, outcome.verdict, outcome.draft.line
         report.history_accepted, report.history_rejected = draft.history_accepted, draft.history_rejected
         report.problems = list(draft.problems)
         report.retries = draft.attempt - 1
-        latency = int((time.perf_counter() - start) * 1000)
-        report.latency_ms = latency
-        line = draft.line
+        report.latency_ms = latency = int((time.perf_counter() - start) * 1000)
         if not outcome.verified:
-            return [
-                self._cue(
-                    moment,
-                    "en",
-                    CueStatus.REJECTED,
-                    line.text[:280],
-                    line.cited_fact_ids,
-                    draft.facts,
-                    verdict.checks,
-                    latency,
-                )
-            ]
-        report.verified = True
-        cited = [f for f in draft.facts if f.fact_id in set(line.cited_fact_ids)]
-        out = [
-            self._cue(
+            return self._cue(
                 moment,
                 "en",
-                CueStatus.VERIFIED,
-                line.text,
+                CueStatus.REJECTED,
+                line.text[:280],
                 line.cited_fact_ids,
-                cited,
+                draft.facts,
                 verdict.checks,
                 latency,
             )
-        ]
-        for tr, tv in outcome.translations:
-            lang = tr.language.lower()[:2]
-            if lang not in self.languages or not tv.passed:
-                report.translations_rejected += 1
+        report.verified = True
+        cited = [f for f in draft.facts if f.fact_id in set(line.cited_fact_ids)]
+        return self._cue(
+            moment, "en", CueStatus.VERIFIED, line.text, line.cited_fact_ids, cited, verdict.checks, latency
+        )
+
+    async def _localise(self, moment: Moment, english: Cue, report: MomentReport, start: float) -> list[Cue]:
+        """Stage 2: languages in parallel batches; each translation must keep the numbers and names."""
+        names = self.ctx.names()
+        langs = list(self.languages)
+        batches = [langs[i : i + TRANSLATE_BATCH] for i in range(0, len(langs), TRANSLATE_BATCH)]
+        results = await asyncio.gather(
+            *(self.brain.translate(english.text, b) for b in batches), return_exceptions=True
+        )
+        out: list[Cue] = []
+        done: set[str] = set()
+        for batch, items in zip(batches, results, strict=True):
+            if isinstance(items, BaseException):
+                report.translations_rejected += len(batch)
                 continue
-            report.translations_verified += 1
-            out.append(
-                self._cue(
-                    moment,
-                    lang,
-                    CueStatus.VERIFIED,
-                    tr.text[:280],
-                    line.cited_fact_ids,
-                    cited,
-                    tv.checks,
-                    int((time.perf_counter() - start) * 1000),
+            for tr in items:
+                lang = canonical(tr.language)
+                verdict = verify_translation(english.text, tr.text, names)
+                if lang is None or lang not in batch or lang in done or not verdict.passed:
+                    report.translations_rejected += 1
+                    continue
+                done.add(lang)
+                report.translations_verified += 1
+                out.append(
+                    self._cue(
+                        moment,
+                        lang,
+                        CueStatus.VERIFIED,
+                        tr.text[:280],
+                        english.cited_fact_ids,
+                        english.facts,
+                        verdict.checks,
+                        int((time.perf_counter() - start) * 1000),
+                    )
                 )
-            )
         return out

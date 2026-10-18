@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D3.1 (mature stack and Studio v1) in review
+**Updated:** Sun 18 Oct 2026 · **Phase:** D3.2 (voices and languages) in review
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -19,6 +19,13 @@
 - D2 merged (#3). D3 PR open from `d3/insights`; merge on green CI.
 - Next: D4 (3D show camera with quality tiers + vision lane). First steps: Poly Haven CC0 textures; Blender retarget pipeline (Mixamo private, Quaternius CC0, CMU) onto one rig; Three.js scene.
 - Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 and CMU soccer mocap in `assets-cc0/`. Blender installed.
+
+## Done in D3.2 (18 Oct): voices and languages (ADR-0012)
+- Ten languages: English, Nigerian English, Nigerian Pidgin, Yoruba, Hausa, Igbo, Arabic, Spanish, French, Portuguese.
+- Spoken commentary (Azure AI Speech, keyless): British and Nigerian English, Pidgin (Nigerian English voice), Arabic, Spanish, French, Portuguese. Showcase match: 33 voiced lines.
+- Two-stage pipeline: the verified English line never waits on translations (parallel batches, own budget).
+- Studio: language menu, commentary toggle, right-to-left Arabic with scores isolated (1-0 never reads 0-1), fonts for tone marks.
+- Open: Yoruba/Hausa/Igbo voices via YarnGPT2 (licence-clean, env ready in scratch); trial waits for free memory. Native review of Yoruba, Hausa, Igbo, Pidgin and Arabic lines (some Yoruba lines keep English football terms).
 
 ## Done in D3.1 (18 Oct): adopt proven components, Studio v1 (ADR-0011)
 - Agents run as a Microsoft Agent Framework workflow; OpenTelemetry tracing to Application Insights (off unless configured).

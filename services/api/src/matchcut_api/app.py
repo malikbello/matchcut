@@ -39,7 +39,8 @@ from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
-LANG = re.compile(r"^[a-z]{2}$")
+LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")  # BCP 47: en, en-NG, pcm, ar, yo
+AUDIO_NAME = re.compile(r"^CU-\d{5}-[a-z]{2,3}(-[A-Z]{2})?\.mp3$")
 COOKIE = "mc_session"
 SESSION_TTL_S = 12 * 3600
 CSP = (
@@ -135,6 +136,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        path = request.url.path
+        if not path.startswith(("/api/", "/media/")) and "Cache-Control" not in response.headers:
+            response.headers["Cache-Control"] = (
+                "no-cache"  # Studio files revalidate, so a release is seen at once
+            )
         return response
 
     # added after the guard so it runs first and the session is ready for the routes
@@ -219,6 +225,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 open_streams[who] -= 1
 
         return EventSourceResponse(events(), ping=15, headers={"Cache-Control": "no-store"})
+
+    @app.get("/media/audio/{match_id}/{name}", dependencies=[Depends(require_session)])
+    def audio(match_id: str, name: str) -> FileResponse:
+        """A spoken, verified line (written by the insights voice step)."""
+        path = s.media_dir / "audio" / match_id / name
+        if not MATCH_ID.match(match_id) or not AUDIO_NAME.match(name) or not path.is_file():
+            raise HTTPException(404, "not found")
+        return FileResponse(
+            path, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"}
+        )
 
     @app.get("/media/{match_id}/clip.mp4", dependencies=[Depends(require_session)])
     def media(match_id: str) -> FileResponse:
