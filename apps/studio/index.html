@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Matchcut Studio</title>
+  <meta name="description" content="Live, verified match intelligence from synthetic football.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+  <link rel="stylesheet" href="studio.css">
+  <script src="studio.js" defer></script>
+</head>
+<body>
+  <header class="bar">
+    <div class="wordmark" aria-label="Matchcut">MATCH<span class="cut">C</span>UT</div>
+    <span class="chip live" id="live-chip" hidden><span class="dot" aria-hidden="true"></span>LIVE</span>
+    <span class="chip synthetic" title="Every club, player and match is generated">Synthetic match</span>
+    <div class="spacer"></div>
+    <label class="select">
+      <span class="sr-only">Language</span>
+      <select id="lang" aria-label="Language">
+        <option value="en">English</option>
+        <option value="es">Español</option>
+        <option value="fr">Français</option>
+        <option value="pt">Português</option>
+      </select>
+    </label>
+    <label class="select">
+      <span class="sr-only">Replay speed</span>
+      <select id="speed" aria-label="Replay speed">
+        <option value="1">1×</option>
+        <option value="10">10×</option>
+        <option value="30" selected>30×</option>
+        <option value="60">60×</option>
+      </select>
+    </label>
+  </header>
+
+  <main id="gate" class="gate">
+    <form id="gate-form" class="card gate-card" autocomplete="off">
+      <h1>Studio access</h1>
+      <p class="muted">Enter the access code from the judging guide.</p>
+      <label for="code" class="sr-only">Access code</label>
+      <input id="code" name="code" type="password" minlength="4" maxlength="64" required placeholder="Access code">
+      <button type="submit" class="primary">Enter</button>
+      <p id="gate-error" class="error" role="alert" hidden></p>
+    </form>
+  </main>
+
+  <main id="studio" class="studio" hidden>
+    <section class="stage" aria-label="Match feed">
+      <div class="screen">
+        <video id="video" playsinline muted hidden></video>
+        <div id="pitch" class="pitch" aria-hidden="true"><div class="halfway"></div><div class="circle"></div></div>
+        <div class="scorebug" aria-live="off">
+          <span class="clock" id="clock">0:00</span>
+          <span class="score" id="score">0-0</span>
+        </div>
+        <div id="cue" class="cue" aria-live="polite" hidden>
+          <div class="cue-kind" id="cue-kind"></div>
+          <p class="cue-text" id="cue-text"></p>
+          <div class="cue-foot">
+            <span class="badge" id="cue-badge"></span>
+            <button type="button" class="link" id="cue-evidence" aria-expanded="false" aria-controls="evidence">Evidence</button>
+          </div>
+        </div>
+      </div>
+      <div id="evidence" class="card evidence" hidden>
+        <h2>Why this line is on screen</h2>
+        <ul id="evidence-list"></ul>
+      </div>
+    </section>
+    <aside class="rail" aria-label="Match moments">
+      <div class="rail-head">
+        <h2>Moments</h2>
+        <select id="match" aria-label="Match"></select>
+      </div>
+      <ol id="timeline" class="timeline"></ol>
+    </aside>
+  </main>
+</body>
+</html>

@@ -1,0 +1,23 @@
+[project]
+name = "matchcut-insights"
+version = "0.1.0"
+description = "Live insights agents: fact sheets, Analyst, Historian, Writer, deterministic Verifier and Localiser."
+requires-python = ">=3.12"
+dependencies = [
+    "matchcut-contracts",
+    "matchcut-analytics",
+    "matchcut-sim",
+    "agent-framework-core==1.22.0",
+    "agent-framework-openai>=1.17,<2",
+    "azure-identity>=1.26",
+]
+
+[project.scripts]
+matchcut-insights = "matchcut_insights.cli:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/matchcut_insights"]
