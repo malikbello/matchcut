@@ -58,6 +58,7 @@
 ## 5. Roadmap beyond the hackathon
 - **Video-game-quality renders:** an Unreal Engine 5 render node with motion matching and football motion-capture, driven by the same tracking feed (needs GPUs and licensed mocap; weeks of specialist work).
 - **CDF export** for interoperability with any CDF-aware tool.
+- **Real-footage lane (research watch):** Dense4D (Güler, Imperial College London, arXiv 2610.22325, Oct 2026) recovers dense 3D surface tracks of body, clothing and hair from ordinary video in one feed-forward pass. Once its code and licence are out, it could lift a fan's broadcast clip into full-body 3D motion for our replay cameras and commentary, and sharpen the vision lane. Not in the hackathon build: code unreleased, and the rules require synthetic data.
 - **Yoruba, Hausa and Igbo voices in production:** a fine-tune on licence-clean studio data (Google WAXAL, BibleTTS) with spoken numbers in each language and a native listening gate; the language registry already takes new languages without code changes (ADR-0012).
 
 ## 6. Risks
