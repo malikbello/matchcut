@@ -1,5 +1,5 @@
-// The stadium: a four-sided bowl of tiered stands with roofs, LED perimeter boards,
-// floodlight pylons and an instanced crowd that rises and roars with the match.
+// The stadium: a closed bowl of tiered stands and curved corners under cantilever roofs whose
+// front edges carry the floodlights, LED perimeter boards and a packed impostor crowd.
 // Everything is procedural (no third-party models), so it ships with the code.
 import * as THREE from "three";
 import { L, W } from "./pitch.js";
@@ -31,13 +31,18 @@ function boardTexture(kits) {
   return t;
 }
 
-// one stand along a side: stepped concrete, seats, back wall and a cantilever roof
-function stand(length, { roof: withRoof = true } = {}) {
+const CONCRETE = new THREE.MeshStandardMaterial({ color: 0x343b47, roughness: 0.92 });
+const STEEL = new THREE.MeshStandardMaterial({ color: 0x2a2f38, roughness: 0.55, metalness: 0.6 });
+const ROOF = new THREE.MeshStandardMaterial({ color: 0x1d222b, roughness: 0.7, metalness: 0.35, side: THREE.DoubleSide });
+const FLOODLIGHT = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff3dd, emissiveIntensity: 9 });
+const BOXES = new THREE.MeshStandardMaterial({ color: 0x0d1118, emissive: 0xffc98a, emissiveIntensity: 0.55, roughness: 0.2, metalness: 0.4 });
+
+// one stand along a side: stepped terrace, seats in club colour, hospitality boxes at the back,
+// and a cantilever roof whose front edge carries the floodlights (as modern grounds light the pitch)
+function stand(length, { seatColour = 0x1b2a44, roofY = null } = {}) {
   const g = new THREE.Group();
-  const concrete = new THREE.MeshStandardMaterial({ color: 0x3a4250, roughness: 0.9 });
-  const seats = new THREE.MeshStandardMaterial({ color: 0x1b2a44, roughness: 0.7 });
-  const steps = new THREE.BoxGeometry(length, STEP_H, STEP_D);
-  const bank = new THREE.InstancedMesh(steps, concrete, ROWS);
+  const seats = new THREE.MeshStandardMaterial({ color: seatColour, roughness: 0.7 });
+  const bank = new THREE.InstancedMesh(new THREE.BoxGeometry(length, STEP_H, STEP_D), CONCRETE, ROWS);
   const m = new THREE.Matrix4();
   for (let r = 0; r < ROWS; r++) {
     m.makeTranslation(0, 1.2 + r * STEP_H, r * STEP_D);
@@ -53,20 +58,65 @@ function stand(length, { roof: withRoof = true } = {}) {
   g.add(seatRows);
   const depth = ROWS * STEP_D;
   const height = 1.2 + ROWS * STEP_H;
-  const wall = new THREE.Mesh(new THREE.BoxGeometry(length, height + 6, 0.6), concrete);
-  wall.position.set(0, (height + 6) / 2, depth + 0.3);
+  const top = roofY ?? height + 7;
+  // back wall up to the roof, with a glazed band of hospitality boxes
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(length, top, 0.6), CONCRETE);
+  wall.position.set(0, top / 2, depth + 0.3);
   g.add(wall);
-  if (withRoof) {
-    const roof = new THREE.Mesh(
-      new THREE.BoxGeometry(length + 4, 0.5, depth * 0.85),
-      new THREE.MeshStandardMaterial({ color: 0x4a525e, roughness: 0.7, metalness: 0.4 }),
-    );
-    roof.position.set(0, height + 6, depth * 0.58);
-    roof.rotation.x = -0.08;
-    roof.castShadow = true;
-    g.add(roof);
+  const boxes = new THREE.Mesh(new THREE.BoxGeometry(length * 0.96, 2.4, 0.2), BOXES);
+  boxes.position.set(0, height + 1.6, depth + 0.02);
+  g.add(boxes);
+  // roof: a sloping sheet reaching out over the front rows
+  const reach = depth + 2;
+  const roof = new THREE.Mesh(new THREE.PlaneGeometry(length + 2, reach), ROOF);
+  roof.rotation.x = -Math.PI / 2 + 0.06;
+  roof.position.set(0, top, depth - reach / 2 + 0.3);
+  roof.castShadow = true;
+  g.add(roof);
+  // front fascia beam and its floodlight strip (the bloom pass makes it glow)
+  const fascia = new THREE.Mesh(new THREE.BoxGeometry(length + 2, 1.4, 0.7), STEEL);
+  fascia.position.set(0, top - 0.6, depth - reach + 0.3);
+  g.add(fascia);
+  const lights = new THREE.Mesh(new THREE.BoxGeometry(length * 0.92, 0.22, 0.22), FLOODLIGHT);
+  lights.position.set(0, top - 1.35, depth - reach + 0.15);
+  g.add(lights);
+  // roof trusses: steel ribs from the back wall to the fascia
+  const ribs = Math.max(4, Math.round(length / 9));
+  const rib = new THREE.BoxGeometry(0.35, 0.9, reach);
+  const ribMesh = new THREE.InstancedMesh(rib, STEEL, ribs);
+  for (let i = 0; i < ribs; i++) {
+    m.makeTranslation(-length / 2 + (i + 0.5) * (length / ribs), top - 0.55, depth - reach / 2 + 0.3);
+    ribMesh.setMatrixAt(i, m);
   }
-  return { group: g, depth, height };
+  g.add(ribMesh);
+  return { group: g, depth, height, top };
+}
+
+// a curved corner stand that closes the bowl between two straight stands
+function corner(sx, sz, top) {
+  const g = new THREE.Group();
+  const thetaStart = sx > 0 ? (sz > 0 ? 0 : Math.PI / 2) : sz > 0 ? (3 * Math.PI) / 2 : Math.PI;
+  for (let r = 0; r < ROWS; r++) {
+    const radius = (r + 1) * STEP_D;
+    const step = new THREE.Mesh(
+      new THREE.CylinderGeometry(radius, radius, STEP_H, 18, 1, false, thetaStart, Math.PI / 2),
+      CONCRETE,
+    );
+    step.position.y = 1.2 + r * STEP_H;
+    step.receiveShadow = true;
+    g.add(step);
+  }
+  const depth = ROWS * STEP_D;
+  const outer = new THREE.Mesh(new THREE.CylinderGeometry(depth + 0.3, depth + 0.3, top, 18, 1, true, thetaStart, Math.PI / 2), CONCRETE);
+  outer.material = CONCRETE;
+  outer.position.y = top / 2;
+  g.add(outer);
+  const roof = new THREE.Mesh(new THREE.RingGeometry(1, depth + 2, 18, 1, -thetaStart, Math.PI / 2) /* ring angles run the other way */, ROOF);
+  roof.rotation.x = Math.PI / 2;
+  roof.position.y = top;
+  g.add(roof);
+  g.position.set(sx * (L / 2 + GAP), 0, sz * (W / 2 + GAP));
+  return g;
 }
 
 // The crowd: impostor cards, as sports games draw big crowds. Each fan is a pre-rendered card
@@ -178,9 +228,9 @@ function crowd(count, kits, base) {
       uTime: { value: 0 },
       uExcite: { value: 0 },
       uLight: { value: 1.0 },
-      uFogColor: { value: new THREE.Color(0x070b14) },
-      uFogNear: { value: 160 },
-      uFogFar: { value: 420 },
+      uFogColor: { value: new THREE.Color(0x0b1424) }, // matches the scene fog
+      uFogNear: { value: 180 },
+      uFogFar: { value: 520 },
     },
   });
   const mesh = new THREE.InstancedMesh(geo, mat, count);
@@ -205,17 +255,36 @@ function crowd(count, kits, base) {
       for (let k = 0; k < perRow; k++) seats.push([sideIdx, row, (k + 0.5) / perRow - 0.5]);
     }
   });
+  // the curved corners: rows are quarter circles around each corner of the bowl
+  const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
+  corners.forEach((c, ci) => {
+    for (let row = 1; row < ROWS; row++) {
+      const per = Math.floor((Math.PI / 2) * row * STEP_D / 0.56);
+      for (let k = 0; k < per; k++) seats.push([4 + ci, row, (k + 0.5) / per]);
+    }
+  });
   for (let i = seats.length - 1; i > 0; i--) {
     const j = Math.floor(rnd() * (i + 1));
     [seats[i], seats[j]] = [seats[j], seats[i]];
   }
   for (let i = 0; i < count; i++) {
     const [sideIdx, row, frac] = seats[i % seats.length];
-    const side = sides[sideIdx];
-    const u = (frac + (rnd() - 0.5) * 0.004) * side.len;
-    const [x, z] = side.at(u, row * STEP_D + 0.25);
+    let x;
+    let z;
+    if (sideIdx < 4) {
+      const side = sides[sideIdx];
+      const u = (frac + (rnd() - 0.5) * 0.004) * side.len;
+      [x, z] = side.at(u, row * STEP_D + 0.25);
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), side.rot);
+    } else {
+      const [cx, cz] = corners[sideIdx - 4];
+      const theta = (frac * Math.PI) / 2;
+      const r = row * STEP_D + 0.4;
+      x = cx * (L / 2 + GAP + r * Math.sin(theta));
+      z = cz * (W / 2 + GAP + r * Math.cos(theta));
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.atan2(-x, -z)); // face the centre spot
+    }
     const y = 1.2 + row * STEP_H + STEP_H / 2;
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), side.rot);
     const size = 0.9 + rnd() * 0.12;
     sc.set(size, size, size);
     m.compose(new THREE.Vector3(x, y, z), q, sc);
@@ -224,8 +293,9 @@ function crowd(count, kits, base) {
     // the long stands are mixed with plenty of neutral colours
     const r = rnd();
     let c;
-    if (sideIdx === 2) c = r < 0.82 ? homeC : NEUTRAL_SHIRTS[Math.floor(rnd() * NEUTRAL_SHIRTS.length)];
-    else if (sideIdx === 3) c = r < 0.72 ? awayC : NEUTRAL_SHIRTS[Math.floor(rnd() * NEUTRAL_SHIRTS.length)];
+    const end = sideIdx === 2 || (sideIdx >= 4 && corners[sideIdx - 4][0] < 0) ? 2 : sideIdx === 3 || sideIdx >= 4 ? 3 : sideIdx;
+    if (end === 2) c = r < 0.82 ? homeC : NEUTRAL_SHIRTS[Math.floor(rnd() * NEUTRAL_SHIRTS.length)];
+    else if (end === 3) c = r < 0.72 ? awayC : NEUTRAL_SHIRTS[Math.floor(rnd() * NEUTRAL_SHIRTS.length)];
     else c = r < 0.38 ? homeC : r < 0.56 ? awayC : NEUTRAL_SHIRTS[Math.floor(rnd() * NEUTRAL_SHIRTS.length)];
     tmp.set(c).offsetHSL(0, 0, (rnd() - 0.5) * 0.1);
     shirt.set([tmp.r, tmp.g, tmp.b], i * 3);
@@ -254,18 +324,24 @@ function mulberry(seed) {
 
 export function buildStadium({ crowdCount, kits, assets = "assets/3d" }) {
   const group = new THREE.Group();
+  const home = new THREE.Color(kits[0]).multiplyScalar(0.55).getHex();
+  const away = new THREE.Color(kits[1]).multiplyScalar(0.55).getHex();
   const placements = [
-    { len: L + 2 * GAP, pos: [0, -(W / 2 + GAP)], rot: Math.PI },
-    { len: L + 2 * GAP, pos: [0, W / 2 + GAP], rot: 0, roof: false }, // main stand: the gantry hangs here
-    { len: W + 2 * GAP, pos: [-(L / 2 + GAP), 0], rot: -Math.PI / 2 },
-    { len: W + 2 * GAP, pos: [L / 2 + GAP, 0], rot: Math.PI / 2 },
+    { len: L + 2 * GAP, pos: [0, -(W / 2 + GAP)], rot: Math.PI, seat: 0x1b2a44 },
+    // main stand: its roof sits above the camera gantry
+    { len: L + 2 * GAP, pos: [0, W / 2 + GAP], rot: 0, seat: 0x1b2a44, roofY: 27 },
+    { len: W + 2 * GAP, pos: [-(L / 2 + GAP), 0], rot: -Math.PI / 2, seat: home },
+    { len: W + 2 * GAP, pos: [L / 2 + GAP, 0], rot: Math.PI / 2, seat: away },
   ];
+  let top = 0;
   for (const p of placements) {
-    const st = stand(p.len, { roof: p.roof !== false });
+    const st = stand(p.len, { seatColour: p.seat, roofY: p.roofY ?? null });
     st.group.position.set(p.pos[0], 0, p.pos[1]);
     st.group.rotation.y = p.rot;
     group.add(st.group);
+    if (!p.roofY) top = st.top;
   }
+  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) group.add(corner(sx, sz, top));
   // LED boards just beyond the touchlines and goal lines
   const tex = boardTexture(kits);
   const boardMat = new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.9 });
@@ -286,20 +362,6 @@ export function buildStadium({ crowdCount, kits, assets = "assets/3d" }) {
     b.rotation.y = ry;
     group.add(b);
   }
-  // floodlight pylons at the corners: emissive heads feed the bloom pass
-  const head = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff4dc, emissiveIntensity: 6 });
-  const steel = new THREE.MeshStandardMaterial({ color: 0x9aa3b2, metalness: 0.6, roughness: 0.4 });
-  for (const [sx, sz] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) {
-    const x = sx * (L / 2 + GAP + ROWS * STEP_D + 6);
-    const z = sz * (W / 2 + GAP + ROWS * STEP_D + 6);
-    const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.9, 48, 12), steel);
-    mast.position.set(x, 24, z);
-    group.add(mast);
-    const panel = new THREE.Mesh(new THREE.BoxGeometry(9, 5, 0.6), head);
-    panel.position.set(x, 49, z);
-    panel.lookAt(0, 0, 0);
-    group.add(panel);
-  }
   const fans = crowd(crowdCount, kits, assets);
   group.add(fans.mesh);
   return { group, crowd: fans };
@@ -310,4 +372,49 @@ export function animateCrowd(crowd, timeS, excitement) {
   const u = crowd.material.uniforms;
   u.uTime.value = timeS;
   u.uExcite.value += (excitement - u.uExcite.value) * 0.06;
+}
+
+// The night sky: a gradient dome from deep navy overhead to a warm floodlight glow on the
+// horizon (the light a lit stadium throws into the haze), with a faint field of stars.
+export function buildSky() {
+  const g = new THREE.Group();
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(600, 32, 16),
+    new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      fog: false,
+      uniforms: {
+        uTop: { value: new THREE.Color(0x03050b) },
+        uMid: { value: new THREE.Color(0x0b1424) },
+        uGlow: { value: new THREE.Color(0x3a2c22) },
+      },
+      vertexShader: "varying vec3 vDir; void main(){ vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+      fragmentShader: `uniform vec3 uTop, uMid, uGlow; varying vec3 vDir;
+        void main(){
+          float h = clamp(vDir.y, 0.0, 1.0);
+          vec3 c = mix(uMid, uTop, smoothstep(0.05, 0.6, h));
+          c += uGlow * exp(-h * 9.0) * 0.9;
+          gl_FragColor = vec4(c, 1.0);
+          #include <colorspace_fragment>
+        }`,
+    }),
+  );
+  g.add(dome);
+  const n = 900;
+  const pos = new Float32Array(n * 3);
+  let a = 7;
+  const rnd = () => ((a = (a * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < n; i++) {
+    const th = rnd() * Math.PI * 2;
+    const y = 0.25 + rnd() * 0.75;
+    const r = Math.sqrt(1 - y * y);
+    pos.set([Math.cos(th) * r * 560, y * 560, Math.sin(th) * r * 560], i * 3);
+  }
+  const stars = new THREE.Points(
+    new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(pos, 3)),
+    new THREE.PointsMaterial({ color: 0x9fb2d6, size: 1.2, sizeAttenuation: false, fog: false, transparent: true, opacity: 0.55 }),
+  );
+  g.add(stars);
+  return g;
 }

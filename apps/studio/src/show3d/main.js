@@ -15,7 +15,7 @@ import { loadLibrary } from "./library.js";
 import { celebrationPose, planPackage, segmentAt } from "./package.js";
 import { Player } from "./players.js";
 import { FrameGovernor, ORDER, TIERS, webglAvailable } from "./quality.js";
-import { animateCrowd, buildStadium } from "./stadium.js";
+import { animateCrowd, buildSky, buildStadium } from "./stadium.js";
 
 export { webglAvailable };
 export { Crowd } from "./crowd.js";
@@ -123,8 +123,9 @@ export async function createShow({
   renderer.shadowMap.type = THREE.PCFShadowMap; // soft filtering is built in since r180
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x070b14);
-  scene.fog = new THREE.Fog(0x070b14, 160, 420);
+  scene.background = new THREE.Color(0x05080f);
+  scene.add(buildSky());
+  scene.fog = new THREE.Fog(0x0b1424, 180, 520);
   const pmrem = new THREE.PMREMGenerator(renderer);
   scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environmentIntensity = 0.25; // reflections only; the floodlights do the lighting
