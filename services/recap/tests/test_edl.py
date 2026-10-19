@@ -152,3 +152,15 @@ def test_the_mix_ducks_the_crowd_under_the_voice_and_normalises_loudness():
     assert "sidechaincompress" in graph
     assert "loudnorm=I=-16" in graph
     assert graph.count("adelay") == len(cut.audio)
+
+
+def test_cards_lead_with_the_fan_and_speak_their_language():
+    kwargs = {"aspect": "9x16", "package_durations": PACKAGES, "clip_durations": {}}
+    fr = build_cut(FEED, CUES, CALLS, focus={"player": "Quinouani"}, language="fr", **kwargs)
+    assert fr.segments[0].title == "Quinouani"
+    assert "Votre résumé" in fr.segments[0].sub
+    assert fr.segments[-1].title.startswith("Fin du match")
+    pcm = build_cut(FEED, CUES, CALLS, focus={"side": "away"}, language="pcm", **kwargs)
+    assert pcm.segments[0].title == "Westcroft United"
+    assert pcm.segments[0].sub.startswith("v Kestrel Bay FC")
+    assert pcm.segments[-1].title.startswith("Full time")  # Nigerian captions use the English cards

@@ -35,7 +35,7 @@ const now = () => performance.now();
 const state = {
   match: null, feed: null, cues: [], moments: [], t: 0, end: 5400000, playing: true, speed: 15,
   shown: null, shownAt: 0, lastFrame: performance.now(), trail: [], dpr: 1,
-  sound: true, audio: new Audio(), callAudio: new Audio(), calls: [], view: "3d", show: null, pkg: null,
+  p2Start: Infinity, sound: true, audio: new Audio(), callAudio: new Audio(), calls: [], view: "3d", show: null, pkg: null,
 };
 state.audio.addEventListener("playing", () => { $("sound").classList.add("speaking"); state.crowd?.duck(true); });
 state.audio.addEventListener("ended", () => { $("sound").classList.remove("speaking"); state.crowd?.duck(false); });
@@ -91,7 +91,25 @@ function icon(id) {
   svg.append(use);
   return svg;
 }
-const clock = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, "0")}`;
+// The broadcast clock, by the engine's rule: the timeline is continuous (stoppage time
+// included), so the second half restarts at 45:00 from its own kick-off, and added time
+// reads 45:00+N / 90:00+N. Minutes follow football: 52:34 is the 53rd minute.
+const mmss = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+function elapsed(ms) {
+  const second = ms >= state.p2Start;
+  return { base: second ? 2700 : 0, s: Math.floor((second ? ms - state.p2Start : ms) / 1000) + (second ? 2700 : 0) };
+}
+function clock(ms) {
+  const { base, s } = elapsed(ms);
+  const full = base + 2700;
+  return s < full ? mmss(s) : `${full / 60}:00+${Math.floor(s / 60) - full / 60 + 1}`;
+}
+function minute(ms) {
+  const { base, s } = elapsed(ms);
+  const full = (base + 2700) / 60;
+  const m = Math.floor(s / 60) + 1;
+  return m <= full ? `${m}'` : `${full}+${m - full}'`;
+}
 
 async function api(path, options) {
   const r = await fetch(path, { credentials: "same-origin", ...options });
@@ -119,6 +137,8 @@ async function loadMatch(match) {
     $("home-code").textContent = home.code; $("away-code").textContent = away.code;
     $("home-kit").style.background = home.kit.primary; $("away-kit").style.background = away.kit.primary;
     state.end = state.feed.t[state.feed.t.length - 1];
+    const p2 = state.feed.period.indexOf(2);
+    state.p2Start = p2 >= 0 ? state.feed.t[p2] : Infinity;
   }
   buildCutPanel();
   await loadCues();
@@ -398,7 +418,7 @@ function draw() {
       $("goal-strap").hidden = !(celebrating && who && state.pkg.pt > 0.6);
       if (who) {
         $("goal-who").textContent = who.name;
-        $("goal-min").textContent = `${Math.floor(state.pkg.goal.t / 60000) + 1}'`;
+        $("goal-min").textContent = minute(state.pkg.goal.t);
       }
       if (res.done) endPackage();
       return;
@@ -523,6 +543,7 @@ window.__render = {
     virtualMs = (index * 1000) / fps;
     const card = $("film-card");
     card.hidden = seg.kind !== "card";
+    document.body.classList.toggle("on-card", seg.kind === "card"); // cards stand alone: no score bug or tags
     if (seg.kind === "card") { $("fc-title").textContent = seg.title || ""; $("fc-sub").textContent = seg.sub || ""; }
     if (seg.kind === "package") {
       const goal = state.feed.goals.find((g) => g.t === seg.goalT);
