@@ -60,12 +60,25 @@ class CutStore(Protocol):
     def film(self, cut_id: str) -> Film | None: ...
 
 
+def progress(st: dict[str, Any], names: list[str]) -> dict[str, Any]:
+    """A queued cut's live status from its slice markers: claims started, parts rendered."""
+    started = sum(1 for n in names if "/claim-" in n)
+    rendered = sum(1 for n in names if "/part-" in n)
+    if not started:
+        return st
+    stage = "assembling" if any(n.endswith("/assemble") for n in names) else "rendering"
+    return {**st, "status": stage, "rendered": rendered, "chunks": st.get("chunks", 1)}
+
+
 def new_id() -> str:
     return f"c-{secrets.token_hex(6)}"
 
 
 class AzureCuts:
-    def __init__(self, account: str):
+    """One queue message per slice of the film; the render job's replicas take them in parallel."""
+
+    def __init__(self, account: str, chunks: int = 10):
+        self.chunks = chunks
         from azure.identity import DefaultAzureCredential  # noqa: PLC0415 - only in Azure
         from azure.storage.blob import BlobServiceClient  # noqa: PLC0415
         from azure.storage.queue import QueueClient  # noqa: PLC0415
@@ -78,17 +91,22 @@ class AzureCuts:
 
     def submit(self, req: CutRequest) -> str:
         cut_id = new_id()
-        self.blobs.upload_blob(
-            f"{cut_id}.json", json.dumps({"id": cut_id, "status": "queued"}).encode(), overwrite=True
-        )
-        self.queue.send_message(json.dumps(req.message(cut_id)))
+        status = {"id": cut_id, "status": "queued", "chunks": self.chunks}
+        self.blobs.upload_blob(f"{cut_id}.json", json.dumps(status).encode(), overwrite=True)
+        for chunk in range(self.chunks):
+            msg = {**req.message(cut_id), "chunk": chunk, "chunks": self.chunks}
+            self.queue.send_message(json.dumps(msg))
         return cut_id
 
     def status(self, cut_id: str) -> dict[str, Any] | None:
         b = self.blobs.get_blob_client(f"{cut_id}.json")
         if not b.exists():
             return None
-        return json.loads(b.download_blob().readall())
+        st = json.loads(b.download_blob().readall())
+        if st.get("status") == "queued":  # progress, from the slices' markers
+            names = [x.name for x in self.blobs.list_blobs(name_starts_with=f"{cut_id}/")]
+            return progress(st, names)
+        return st
 
     def film(self, cut_id: str) -> Film | None:
         b = self.blobs.get_blob_client(f"{cut_id}.mp4")

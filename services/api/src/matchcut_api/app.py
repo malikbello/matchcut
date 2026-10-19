@@ -73,6 +73,7 @@ class Settings:
     cuts_dir: Path = Path("out/cuts")
     port: int = 8080
     cuts_per_hour: int = 6
+    cut_chunks: int = 10  # slices rendered in parallel per cut on Azure
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -91,6 +92,7 @@ class Settings:
             render_code=os.environ.get("MATCHCUT_RENDER_CODE") or None,
             cuts_dir=Path(os.environ.get("MATCHCUT_CUTS_DIR", "out/cuts")),
             port=int(os.environ.get("PORT", "8080")),
+            cut_chunks=int(os.environ.get("MATCHCUT_CUT_CHUNKS", "10")),
         )
 
 
@@ -290,7 +292,7 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
     # ---------------------------------------------------------------- fan cuts
     store = cuts
     if store is None and s.storage_account:
-        store = AzureCuts(s.storage_account)
+        store = AzureCuts(s.storage_account, s.cut_chunks)
     elif store is None and s.render_code:
         store = LocalCuts(s.cuts_dir, f"http://127.0.0.1:{s.port}", s.render_code)
     per_hour = parse(f"{s.cuts_per_hour}/hour")

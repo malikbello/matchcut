@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from matchcut_api import Settings, create_app
 from matchcut_api.app import sha256
-from matchcut_api.cuts import Film
+from matchcut_api.cuts import Film, progress
 from matchcut_contracts import Cue, CueStatus, MomentKind
 
 CODE = "kickoff-2026"
@@ -263,3 +263,11 @@ def test_films_answer_byte_ranges_so_players_can_seek(cuts_client):
     assert part.headers["content-range"] == "bytes 4-6/9"
     assert client.get(url, headers={"Range": "bytes=-3"}).content == b"tes"
     assert client.get(url, headers={"Range": "bytes=50-"}).status_code == 416
+
+
+def test_a_queued_cut_reports_progress_from_its_slices():
+    st = {"id": "c-0123456789ab", "status": "queued", "chunks": 10}
+    assert progress(st, []) == st
+    names = ["c-0123456789ab/claim-00", "c-0123456789ab/claim-01", "c-0123456789ab/part-00.mp4"]
+    assert progress(st, names) | {} == {**st, "status": "rendering", "rendered": 1}
+    assert progress(st, [*names, "c-0123456789ab/assemble"])["status"] == "assembling"

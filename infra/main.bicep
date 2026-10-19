@@ -242,6 +242,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = if (deployApps) {
           env: concat(commonEnv, [
             { name: 'MATCHCUT_ACCESS_CODE_SHA256', secretRef: 'access-code-sha256' }
             { name: 'MATCHCUT_SESSION_SECRET', secretRef: 'session-secret' }
+            { name: 'MATCHCUT_CUT_CHUNKS', value: '10' }
           ])
           probes: [
             { type: 'Liveness', httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 30 }
@@ -273,7 +274,7 @@ resource recap 'Microsoft.App/jobs@2025-01-01' = if (deployApps) {
         replicaCompletionCount: 1
         scale: {
           minExecutions: 0
-          maxExecutions: 3
+          maxExecutions: 20 // two films at once: 10 slices each, 4 vCPU per slice, within 100 cores
           pollingInterval: 15
           rules: [
             {

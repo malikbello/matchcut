@@ -17,15 +17,28 @@ from typing import Any
 from playwright.sync_api import Page, sync_playwright
 
 SIZES = {"16x9": (1280, 720), "9x16": (720, 1280)}
+# Films render at one fixed quality for the whole cut. Measured on CPU (Mesa llvmpipe, 720x1280):
+# High 3.8 s a frame, of which ambient occlusion is 2.1 s; without it 1.8 s. At film size the
+# shadow maps already ground the players, so films keep shadows, bloom and the full crowd.
+FILM_QUALITY: dict[str, Any] = {"base": "high", "gtao": False}
 GPU_LESS_ARGS = ["--use-gl=angle", "--use-angle=gl", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 
 
 class Studio:
     """A render-mode Studio page, signed in, with the match loaded."""
 
-    def __init__(self, base: str, code: str, match: str, lang: str, aspect: str, gpu_less: bool = False):
+    def __init__(
+        self,
+        base: str,
+        code: str,
+        match: str,
+        lang: str,
+        aspect: str,
+        gpu_less: bool = False,
+        quality: str | dict[str, Any] = FILM_QUALITY,
+    ):
         self.base, self.code, self.match, self.lang, self.aspect = base.rstrip("/"), code, match, lang, aspect
-        self.gpu_less = gpu_less
+        self.gpu_less, self.quality = gpu_less, quality
         self._pw = None
         self.page: Page | None = None
 
@@ -41,7 +54,8 @@ class Studio:
         self.page.goto(f"{self.base}/?render=1")
         self.page.wait_for_function("() => window.__render")
         self.info = self.page.evaluate(
-            "(a) => window.__render.init(a)", {"match": self.match, "lang": self.lang, "aspect": self.aspect}
+            "(a) => window.__render.init(a)",
+            {"match": self.match, "lang": self.lang, "aspect": self.aspect, "quality": self.quality},
         )
         return self
 
@@ -72,8 +86,15 @@ class Studio:
         out: Path,
         ffmpeg: str = "ffmpeg",
         progress: Callable[[int, int, float], None] | None = None,
+        first: int = 0,
+        warmup: list[dict[str, Any]] | None = None,
     ) -> Path:
+        """Encode `specs` as frames `first`, `first + 1`, ... of the film. A slice of a film
+        (one render-job chunk) first steps through `warmup`, the frames just before it,
+        uncaptured, so animation blends and camera moves match a straight-through render."""
         assert self.page
+        for j, spec in enumerate(warmup or []):
+            self.step(spec, first - len(warmup or []) + j, fps)
         enc = subprocess.Popen(  # noqa: S603 - our own arguments
             [
                 ffmpeg,
@@ -114,7 +135,7 @@ class Studio:
         assert enc.stdin
         t0 = time.perf_counter()
         for i, spec in enumerate(specs):
-            self.page.evaluate("([s, i, f]) => window.__render.frame(s, i, f)", [spec, i, fps])
+            self.step(spec, first + i, fps)
             enc.stdin.write(self.page.screenshot(type="jpeg", quality=92))
             if progress and (i % 30 == 0 or i == len(specs) - 1):
                 progress(i + 1, len(specs), time.perf_counter() - t0)
@@ -122,6 +143,37 @@ class Studio:
         if enc.wait() != 0:
             raise RuntimeError("video encode failed")
         return out
+
+
+def concat(parts: list[Path], out: Path, ffmpeg: str = "ffmpeg") -> Path:
+    """Join chunk videos losslessly: every chunk is its own H.264 stream with the same settings,
+    starting on a keyframe, so the parts butt together with no re-encode."""
+    listing = out.with_suffix(".parts.txt")
+    lines = [f"file '{p.resolve().as_posix()}'" for p in parts]
+    listing.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
+    subprocess.run(  # noqa: S603 - our own arguments
+        [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(listing),
+            "-c",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(out),
+        ],
+        check=True,
+    )
+    listing.unlink(missing_ok=True)
+    return out
 
 
 def mux(video: Path, audio: Path, out: Path, ffmpeg: str = "ffmpeg") -> Path:
