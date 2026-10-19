@@ -86,9 +86,14 @@ class AzureSpeech:
             lambda: credential.get_token("https://cognitiveservices.azure.com/.default").token,
         )
 
-    def synthesize(self, text: str, lang: str, kind: str = "") -> tuple[bytes, str] | None:
-        """Return (mp3 bytes, voice id), or None when the language has no Azure voice."""
-        key = voice_key(lang, kind)
+    def synthesize(
+        self, text: str, lang: str, kind: str = "", live: bool = False
+    ) -> tuple[bytes, str] | None:
+        """Return (mp3 bytes, voice id), or None when the language has no Azure voice.
+
+        live: use the low-latency Flash model of an expressive voice (play-by-play calls).
+        """
+        key = voice_key(lang, kind, live=live)
         if key is None or not key.startswith("azure:"):
             return None
         voice, _, style = key.split(":", 1)[1].partition("#")
@@ -106,13 +111,16 @@ class AzureSpeech:
         return r.content, key
 
 
-def voice_key(lang: str, kind: str = "") -> str | None:
+def voice_key(lang: str, kind: str = "", live: bool = False) -> str | None:
     """The voice and mood for a line, e.g. 'azure:en-GB-Harry:MAI-Voice-2.1#joyful'."""
     spec = LANGUAGES.get(lang)
     if spec is None or not spec.voice:
         return None
+    voice = spec.voice
+    if live and voice.endswith(":MAI-Voice-2.1"):
+        voice += "-Flash"  # the same voice on the low-latency model, for live calls
     mood = spec.mood(kind)
-    return f"{spec.voice}#{mood}" if mood else spec.voice
+    return f"{voice}#{mood}" if mood else voice
 
 
 MANIFEST = "voices.json"  # cue ID -> voice key, so a voice change re-renders only what changed
@@ -156,31 +164,42 @@ def _read_manifest(folder: Path) -> dict[str, str]:
     return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
 
 
-def voice_calls(calls: list, match_id: str, speech: AzureSpeech, media_root: str | Path) -> int:
-    """Voice play-by-play calls (see calls.py); cached by call ID and voice like the cues."""
+def voice_calls(
+    calls: list, match_id: str, speech: AzureSpeech, media_root: str | Path, workers: int = 8
+) -> int:
+    """Voice play-by-play calls (see calls.py) on the live (Flash) voices, in parallel.
+
+    Cached by call ID and voice like the cues: only new or changed calls are synthesised.
+    """
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
     from matchcut_insights.calls import CALL_MOOD  # noqa: PLC0415 - avoids an import cycle
 
     folder = Path(media_root) / "audio" / match_id
     manifest = _read_manifest(folder)
-    done = 0
+    todo = []
     for call in calls:
         mood = CALL_MOOD.get(call.kind, "")
-        key = voice_key(call.language, mood)
+        key = voice_key(call.language, mood, live=True)
         if key is None:
             continue
         key = f"{key}+lift" if call.kind == "build" else key
         rel = Path("audio") / match_id / f"{call.call_id}.mp3"
-        target = Path(media_root) / rel
-        if not (target.is_file() and manifest.get(call.call_id) == key):
-            result = speech.synthesize(call.text, call.language, mood)
-            if result is None:
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(result[0])
-            manifest[call.call_id] = key
         call.audio, call.voice = rel.as_posix(), key
-        done += 1
-    if manifest:
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True), encoding="utf-8")
-    return done
+        if not ((Path(media_root) / rel).is_file() and manifest.get(call.call_id) == key):
+            todo.append((call, mood, key))
+
+    def work(item: tuple) -> tuple:
+        call, mood, key = item
+        return call, key, speech.synthesize(call.text, call.language, mood, live=True)
+
+    folder.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for call, key, result in pool.map(work, todo):
+            if result is None:
+                call.audio = call.voice = None
+                continue
+            (Path(media_root) / call.audio).write_bytes(result[0])
+            manifest[call.call_id] = key
+    (folder / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True), encoding="utf-8")
+    return sum(1 for c in calls if c.audio)
