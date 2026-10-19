@@ -10,9 +10,21 @@ from collections.abc import Sequence
 
 from matchcut_contracts import Fact, Moment, MomentKind
 
+from matchcut_insights.facts import CHANCE_IN_10, CHANCE_ONE_IN
+
 
 def _get(facts: Sequence[Fact], label: str) -> Fact | None:
     return next((f for f in facts if f.label == label), None)
+
+
+def _chance(facts: Sequence[Fact]) -> tuple[str, Fact] | None:
+    """Chance quality in fans' words, from the code-computed chance fact."""
+    for f in facts:
+        if f.label.startswith(CHANCE_IN_10):
+            return f"a chance scored {f.value} times in 10", f
+        if f.label.startswith(CHANCE_ONE_IN):
+            return f"a chance scored once in every {f.value} attempts", f
+    return None
 
 
 def plain_card(moment: Moment, facts: Sequence[Fact]) -> tuple[str, list[str]]:
@@ -31,11 +43,13 @@ def plain_card(moment: Moment, facts: Sequence[Fact]) -> tuple[str, list[str]]:
         if score:
             used.append(score)
     elif k == MomentKind.BIG_CHANCE:
-        metric = _get(facts, "expected goals of the shot (0 to 1)")
-        text = f"{m} Big chance for {who}" + (f" (xG {metric.value})" if metric else "")
+        chance = _chance(facts)
+        metric = chance[1] if chance else None
+        text = f"{m} Big chance for {who}" + (f": {chance[0]}" if chance else "")
     elif k == MomentKind.GREAT_SAVE:
-        metric = _get(facts, "expected goals of the shot that was saved (0 to 1)")
-        text = f"{m} Big save by {who}" + (f" (xG {metric.value} denied)" if metric else "")
+        chance = _chance(facts)
+        metric = chance[1] if chance else None
+        text = f"{m} Big save by {who}" + (f", denying {chance[0]}" if chance else "")
     elif k == MomentKind.SPEED_PEAK:
         metric = _get(facts, "top speed in km/h")
         text = f"{m} {who} hits {metric.value} km/h" if metric else f"{m} {who} at full speed"

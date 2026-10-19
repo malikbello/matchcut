@@ -2,6 +2,10 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+// Render mode (films): the clock is virtual, so every frame of an exported cut is reproducible
+const RENDER = new URLSearchParams(location.search).has("render");
+let virtualMs = 0;
+if (RENDER) performance.now = () => virtualMs;
 const KIND = {
   goal: ["Goal", "i-goal"], big_chance: ["Big chance", "i-chance"], great_save: ["Big save", "i-save"],
   momentum_swing: ["Momentum", "i-momentum"], press_surge: ["Pressing", "i-press"],
@@ -9,10 +13,11 @@ const KIND = {
   card: ["Card", "i-card"], substitution: ["Substitution", "i-sub"],
 };
 // one hero number per card: the fact that best tells the moment, and its short label
+// chance quality is shown as fans say it ("9 times in 10"), never as a raw xG decimal
 const HERO = {
-  goal: [["expected goals of the shot (0", "xG"]],
-  big_chance: [["expected goals of the shot (0", "xG"]],
-  great_save: [["expected goals of the shot that was saved", "xG denied"]],
+  goal: [["times in 10 a chance", "in 10 scored"], ["a chance like this is scored once", "tries per goal"]],
+  big_chance: [["times in 10 a chance", "in 10 scored"], ["a chance like this is scored once", "tries per goal"]],
+  great_save: [["times in 10 a chance", "in 10 scored"], ["a chance like this is scored once", "tries per goal"]],
   speed_peak: [["top speed in km/h", "km/h"]],
   tactical_shift: [["opponent passes per defensive action, last", "PPDA now"]],
   momentum_swing: [["momentum", "momentum"]],
@@ -23,16 +28,48 @@ const LRI = String.fromCharCode(0x2066), PDI = String.fromCharCode(0x2069);
 const isolateNumbers = (text, lang) => (RTL.has(lang) ? text.replace(/[0-9]+(?:[.,][0-9]+)?(?:-[0-9]+)?(?: ?xG)?/g, (m) => LRI + m + PDI) : text);
 const CUE_SECONDS = 7; // on screen for 7 s of wall time at any replay speed
 const PITCH = { L: 105, W: 68 };
+// how loud the 3D crowd gets while a moment's card is on screen (0 calm to 1 eruption)
+const EXCITEMENT = { goal: 1, big_chance: 0.75, great_save: 0.7, card: 0.45, speed_peak: 0.4 };
+const now = () => performance.now();
 
 const state = {
   match: null, feed: null, cues: [], moments: [], t: 0, end: 5400000, playing: true, speed: 15,
   shown: null, shownAt: 0, lastFrame: performance.now(), trail: [], dpr: 1,
-  sound: true, audio: new Audio(),
+  sound: true, audio: new Audio(), callAudio: new Audio(), calls: [], view: "3d", show: null, pkg: null,
 };
-state.audio.addEventListener("playing", () => $("sound").classList.add("speaking"));
-state.audio.addEventListener("ended", () => $("sound").classList.remove("speaking"));
+state.audio.addEventListener("playing", () => { $("sound").classList.add("speaking"); state.crowd?.duck(true); });
+state.audio.addEventListener("ended", () => { $("sound").classList.remove("speaking"); state.crowd?.duck(false); });
+state.callAudio.addEventListener("playing", () => state.crowd?.duck(true));
+state.callAudio.addEventListener("ended", () => state.crowd?.duck(false));
 
+// the crowd mix lives in the show bundle; it plays in 2D and 3D, once the viewer has interacted
+async function startCrowd() {
+  if (state.crowd || state.crowdStarting) return;
+  state.crowdStarting = true;
+  try {
+    const mod = await import("./dist/show3d.js");
+    state.crowd = new mod.Crowd("assets/audio/crowd");
+    state.crowd.setEnabled(state.sound);
+    await state.crowd.start();
+  } catch (err) { console.warn("crowd audio unavailable", err); }
+}
+// 2D excitement: how close the ball is to either goal
+function dangerAt(t) {
+  if (!state.feed) return 0;
+  const [a] = frameAt(t);
+  const bx = state.feed.b[a][0] / 10;
+  return Math.max(0, Math.min(1, 1 - (PITCH.L / 2 - Math.abs(bx - PITCH.L / 2)) / 30)) * 0.6;
+}
+
+// the play-by-play voice: live calls cut in over a co-commentary line still playing
+function call(c) {
+  if (!state.sound || !c.audio) return;
+  state.audio.pause();
+  state.callAudio.src = `/media/${c.audio}`;
+  state.callAudio.play().catch(() => {});
+}
 function speak(cue) {
+  if (!state.callAudio.paused && !state.callAudio.ended) return; // never talk over a live call
   state.audio.pause();
   $("sound").classList.remove("speaking");
   if (!state.sound || !cue.audio) return;
@@ -83,11 +120,73 @@ async function loadMatch(match) {
     $("home-kit").style.background = home.kit.primary; $("away-kit").style.background = away.kit.primary;
     state.end = state.feed.t[state.feed.t.length - 1];
   }
+  buildCutPanel();
   await loadCues();
   seek(0);
+  if (state.view === "3d") startShow();
+}
+
+// ------------------------------------------------------------ 3D show camera
+// Loaded on demand as its own bundle; any failure (no WebGL, a slow device that keeps
+// stepping down, a load error) falls back to the 2D data pitch with the same clock.
+async function startShow() {
+  state.show?.dispose(); state.show = null;
+  if (!state.feed) return setView("2d");
+  $("show-loading").hidden = false;
+  try {
+    const mod = await import("./dist/show3d.js");
+    if (!mod.webglAvailable()) throw new Error("WebGL2 unavailable");
+    state.show = await mod.createShow({
+      canvas: $("show"), feed: state.feed, assets: "assets/3d",
+      onQuality: (tier) => console.info(`show camera quality: ${tier}`),
+    });
+    state.show.setMode($("cam").value);
+    if (location.hostname === "127.0.0.1") window.__show = state.show; // local tuning only
+  } catch (err) {
+    console.warn("3D show camera unavailable, using the 2D pitch", err);
+    setView("2d");
+  } finally {
+    $("show-loading").hidden = true;
+  }
+}
+// a broadcast ID tag over a player's head (3D view), or hidden when slot < 0
+function placeTag(slot, who) {
+  const pos = slot >= 0 && who ? state.show.screenOf(slot) : null;
+  const tag = $("tag");
+  if (!pos) { tag.hidden = true; tag.dataset.slot = ""; return; }
+  if (tag.dataset.slot !== String(slot)) {
+    tag.dataset.slot = String(slot);
+    $("tag-num").textContent = String(who.num);
+    $("tag-name").textContent = who.name;
+    $("tag-bar").style.background = state.feed.slots[slot] === state.feed.teams.home.id ? "var(--home)" : "var(--away)";
+  }
+  tag.hidden = false;
+  tag.style.left = `${(pos.x * 100).toFixed(2)}%`;
+  tag.style.top = `${(pos.y * 100).toFixed(2)}%`;
+}
+function endPackage() {
+  if (!state.pkg) return;
+  state.t = Math.max(state.t, state.pkg.goal.t + 1500);
+  state.pkg = null;
+  state.show?.endPackage();
+  $("wipe").hidden = true; $("replay-bug").hidden = true; $("skip-replay").hidden = true;
+  $("goal-strap").hidden = true; $("tag").hidden = true;
+}
+function setView(view) {
+  state.view = view;
+  const is3d = view === "3d";
+  $("view-3d").setAttribute("aria-pressed", String(is3d));
+  $("view-2d").setAttribute("aria-pressed", String(!is3d));
+  $("show").hidden = !is3d; $("pitch").hidden = is3d; $("cam-wrap").hidden = !is3d;
+  if (!is3d) $("tag").hidden = true;
+  if (is3d && !state.show && state.feed) startShow();
+  if (!is3d) resize();
 }
 async function loadCues() {
-  state.cues = await api(`/api/matches/${encodeURIComponent(state.match.match_id)}/cues?lang=${$("lang").value}`);
+  const id = encodeURIComponent(state.match.match_id);
+  const lang = $("lang").value;
+  state.calls = await api(`/api/matches/${id}/calls?lang=${lang}`).catch(() => []);
+  state.cues = await api(`/api/matches/${id}/cues?lang=${lang}`);
   state.moments = state.cues; // one cue per moment, best available for this language
   if (!state.feed && state.cues.length) state.end = state.cues[state.cues.length - 1].t_ms + 120000;
   drawMarkers();
@@ -102,6 +201,7 @@ function teamOf(cue) {
 
 // ------------------------------------------------------------ clock
 function seek(t) {
+  endPackage();
   state.t = Math.max(0, Math.min(t, state.end));
   state.trail = [];
   state.shown = null;
@@ -110,18 +210,31 @@ function seek(t) {
   updateBug();
 }
 function tick(now) {
+  if (RENDER) return; // films are driven frame by frame by window.__render
   requestAnimationFrame(tick); // schedule first: one bad frame must never stop the clock
   try { step(now); } catch (err) { console.error(err); }
 }
 function step(now) {
   const dt = Math.min(now - state.lastFrame, 1000); // keep real time even when frames are slow
   state.lastFrame = now;
-  if (state.playing && state.t < state.end) {
+  if (state.pkg) {
+    // goal package: celebration and replays play in real time while the match clock holds
+    if (state.playing) state.pkg.pt += dt / 1000;
+  } else if (state.playing && state.t < state.end) {
     const before = state.t;
     state.t = Math.min(state.end, state.t + dt * state.speed);
+    const goal = state.view === "3d" && state.show && state.speed <= 15
+      ? (state.feed?.goals ?? []).find((g) => g.t > before && g.t <= state.t) : null;
+    if (goal) {
+      state.t = goal.t + 600;
+      state.pkg = { plan: state.show.packageFor(goal), pt: 0, goal };
+    }
+    if ((state.feed?.goals ?? []).some((g) => g.t > before && g.t <= state.t + 700)) state.crowd?.goal();
     for (const c of state.moments) {
       if (c.t_ms > before && c.t_ms <= state.t) { showCue(c); addToTimeline(c); }
     }
+    // play-by-play: at broadcast speeds only (at 40x the calls would trip over each other)
+    if (state.speed <= 15) for (const c of state.calls ?? []) if (c.t_ms > before && c.t_ms <= state.t) call(c);
     updateBug();
   }
   if (state.shown && now - state.shownAt > CUE_SECONDS * 1000) hideCue();
@@ -269,6 +382,38 @@ function renderPitch(W, H, d, X, Y, s) {
   return off;
 }
 function draw() {
+  if (state.view === "3d" && state.show && state.feed) {
+    if (state.pkg) {
+      const res = state.show.renderPackage(state.pkg.plan, state.pkg.pt);
+      state.crowd?.update(res.excitement ?? 0.6);
+      $("wipe").hidden = !res.wipe;
+      $("replay-bug").hidden = !res.label;
+      $("replay-bug").classList.toggle("slow", Boolean(res.slowMotion));
+      $("skip-replay").hidden = false;
+      // the scorer's tag and the goal strap ride the celebration
+      const celebrating = !res.label && !res.wipe && state.pkg.pt < 7;
+      const scorer = state.pkg.plan.scorer;
+      const who = scorer >= 0 ? state.feed.players[rosterAt(state.pkg.goal.t)[String(scorer)]] : null;
+      placeTag(celebrating && who ? scorer : -1, who);
+      $("goal-strap").hidden = !(celebrating && who && state.pkg.pt > 0.6);
+      if (who) {
+        $("goal-who").textContent = who.name;
+        $("goal-min").textContent = `${Math.floor(state.pkg.goal.t / 60000) + 1}'`;
+      }
+      if (res.done) endPackage();
+      return;
+    }
+    const excitement = state.shown && now() - state.shownAt < 6000 ? EXCITEMENT[state.shown.kind] : null;
+    const out = state.show.render(state.t, { excitement });
+    state.crowd?.update(out?.excitement ?? 0);
+    // the player a moment card is about gets a broadcast ID tag while the card is up
+    const named = state.shown && now() - state.shownAt < CUE_SECONDS * 1000 && fact(state.shown, "player involved");
+    const slot = named ? state.show.slotOf(named.value) : -1;
+    placeTag(slot, slot >= 0 ? state.feed.players[rosterAt(state.t)[String(slot)]] : null);
+    return;
+  }
+  state.crowd?.update(state.shown && now() - state.shownAt < 6000 ? EXCITEMENT[state.shown.kind] ?? dangerAt(state.t) : dangerAt(state.t));
+  if (state.view === "3d" || !canvas.width || !canvas.height) return; // 3D still loading, or not on screen
   const W = canvas.width, H = canvas.height, d = state.dpr;
   const pad = 0.06 * W;
   const sx = (W - 2 * pad) / PITCH.L, sy = (H - 2 * pad * 0.55) / PITCH.W, s = Math.min(sx, sy);
@@ -284,7 +429,7 @@ function draw() {
   const spotlight = state.shown && fact(state.shown, "player involved");
   const players = [];
   for (let slot = 0; slot < state.feed.slots.length; slot++) {
-    if (pa[2 * slot] < 0 || pb[2 * slot] < 0) continue;
+    if (pa[2 * slot] === -9999 || pb[2 * slot] === -9999) continue; // empty slot (negative positions are real)
     const x = (pa[2 * slot] + (pb[2 * slot] - pa[2 * slot]) * u) / 10;
     const y = (pa[2 * slot + 1] + (pb[2 * slot + 1] - pa[2 * slot + 1]) * u) / 10;
     const side = state.feed.slots[slot] === state.feed.teams.home.id ? "home" : "away";
@@ -340,6 +485,188 @@ function scrubTo(evt) {
   const r = $("scrubber").getBoundingClientRect();
   seek(((evt.clientX - r.left) / r.width) * state.end);
 }
+// ------------------------------------------------------------ render mode (films)
+// The recap renderer (services/recap) opens the Studio with ?render and drives it one frame at a
+// time: a title card, live run-ups with the verified cards, goal packages, an end card. CSS
+// animations are stepped by hand so the cut-ins and wipes land on the same frames every time.
+const tracked = new WeakSet();
+function stepAnimations(ms) {
+  for (const a of document.getAnimations()) {
+    if (!tracked.has(a)) {
+      tracked.add(a);
+      a.pause();
+      a.currentTime = 0;
+    } else {
+      a.currentTime = (a.currentTime ?? 0) + ms;
+    }
+  }
+}
+window.__render = {
+  async init({ match, lang, aspect }) {
+    document.body.classList.add("render", `aspect-${aspect}`);
+    $("gate").hidden = true; $("studio").hidden = false;
+    state.sound = false; state.playing = false;
+    $("lang").value = lang;
+    const list = await api("/api/matches");
+    state.list = list;
+    await loadMatch(list.find((m) => m.match_id === match));
+    setView("3d");
+    while (!state.show) await new Promise((r) => setTimeout(r, 100));
+    return { end: state.end, goals: state.feed.goals, moments: state.moments.length };
+  },
+  packageDuration(goalT) {
+    const goal = state.feed.goals.find((g) => g.t === goalT);
+    return goal ? state.show.packageFor(goal).duration : 0;
+  },
+  // seg: { kind: "card" | "live" | "package", t, pt, goalT, title, sub }; index counts output frames
+  frame(seg, index, fps) {
+    virtualMs = (index * 1000) / fps;
+    const card = $("film-card");
+    card.hidden = seg.kind !== "card";
+    if (seg.kind === "card") { $("fc-title").textContent = seg.title || ""; $("fc-sub").textContent = seg.sub || ""; }
+    if (seg.kind === "package") {
+      const goal = state.feed.goals.find((g) => g.t === seg.goalT);
+      if (!state.pkg || state.pkg.goal !== goal) state.pkg = { plan: state.show.packageFor(goal), pt: 0, goal };
+      state.pkg.pt = seg.pt;
+      state.t = goal.t + 600;
+    } else {
+      if (state.pkg) endPackage();
+      const jumped = state.renderPrev === undefined || seg.t < state.renderPrev || seg.t - state.renderPrev > 2000;
+      const before = jumped ? seg.t - 1 : state.renderPrev;
+      if (jumped) { state.shown = null; $("cue").hidden = true; state.show.endPackage(); }
+      if (seg.kind === "live") for (const c of state.moments) if (c.t_ms > before && c.t_ms <= seg.t) showCue(c);
+      state.t = seg.t;
+      state.renderPrev = seg.t;
+      if (state.shown && virtualMs - state.shownAt > CUE_SECONDS * 1000) hideCue();
+    }
+    updateBug();
+    draw();
+    stepAnimations(1000 / fps);
+    return true;
+  },
+};
+
+// ------------------------------------------------------------ your cut
+// A fan's own film: club or player, language, format. The request goes to the render
+// job (a queue-triggered Container Apps Job on Azure); the panel follows it until the
+// film is ready to watch, download and share. One cut is remembered per tab.
+const CUT_LANGS = ["en", "en-NG", "pcm", "fr", "es", "pt", "ar"]; // languages with voiced calls today
+const cut = { focus: "side", side: "home", aspect: "9x16", id: null, timer: 0, started: 0 };
+const remember = (id) => { try { id ? sessionStorage.setItem("matchcut.cut", id) : sessionStorage.removeItem("matchcut.cut"); } catch { /* storage is optional */ } };
+const remembered = () => { try { return sessionStorage.getItem("matchcut.cut"); } catch { return null; } };
+function pick(group, attr, value) {
+  for (const b of group.querySelectorAll("[role=radio]")) b.setAttribute("aria-checked", String(b.dataset[attr] === value));
+}
+function buildCutPanel() {
+  const feed = state.feed;
+  $("cut").hidden = !feed || RENDER;
+  if (!feed) return;
+  $("cut-clubs").replaceChildren(...["home", "away"].map((side) => {
+    const team = feed.teams[side];
+    const b = el("button", { type: "button", role: "radio", class: "club", "data-side": side, "aria-checked": String(cut.side === side) });
+    const kit = el("span", { class: "kit" }); kit.style.background = team.kit.primary;
+    b.append(kit, el("span", { class: "code" }, team.code), el("span", { class: "name" }, team.name));
+    b.addEventListener("click", () => { cut.side = side; pick($("cut-clubs"), "side", side); });
+    return b;
+  }));
+  const groups = ["home", "away"].map((side) => {
+    const team = feed.teams[side];
+    const ids = new Set(Object.values(team.players).map((p) => p.id));
+    for (const c of feed.changes || []) if (c.id && feed.slots[c.slot] === team.id) ids.add(c.id);
+    const names = [...ids].map((id) => feed.players[id]).filter(Boolean).sort((x, y) => x.num - y.num);
+    const g = el("optgroup", { label: team.name });
+    g.append(...names.map((pl) => el("option", { value: pl.name }, `${pl.num}  ${pl.name}`)));
+    return g;
+  });
+  $("cut-player").replaceChildren(...groups);
+  const labels = Object.fromEntries([...$("lang").options].map((o) => [o.value, o.textContent]));
+  $("cut-lang").replaceChildren(...CUT_LANGS.map((l) => el("option", { value: l }, labels[l] || l)));
+  $("cut-lang").value = CUT_LANGS.includes($("lang").value) ? $("lang").value : "en";
+}
+function cutStage(stage, detail = {}) {
+  $("cut-progress").hidden = stage !== "working";
+  $("cut-result").hidden = stage !== "done";
+  $("cut-error").hidden = stage !== "failed";
+  $("cut-go").disabled = stage === "working";
+  $("cut-go").hidden = stage === "done";
+  if (stage === "failed") $("cut-error").textContent = detail.message || "That cut could not be made. Try again.";
+  if (stage === "done") {
+    const src = `/media/cuts/${cut.id}.mp4`;
+    $("cut-video").src = src;
+    $("cut-download").href = src;
+    $("cut-download").setAttribute("download", `matchcut-${cut.id}.mp4`);
+    $("cut-share").hidden = !(navigator.canShare && navigator.canShare({ files: [new File([""], "x.mp4", { type: "video/mp4" })] }));
+  }
+}
+async function followCut() {
+  clearTimeout(cut.timer);
+  if (!cut.id) return;
+  let st;
+  try { st = await api(`/api/cuts/${cut.id}`); }
+  catch (err) {
+    if (String(err.message).includes("404")) { remember(null); cut.id = null; cutStage("idle"); return; }
+    cut.timer = setTimeout(followCut, 5000); return; // a blip: keep following
+  }
+  if (st.status === "done") { remember(null); cutStage("done"); return; }
+  if (st.status === "failed") { remember(null); cutStage("failed"); return; }
+  const mins = Math.floor((Date.now() - cut.started) / 60000);
+  $("cut-state").textContent = st.status === "queued" ? "In the queue" : "Rendering your film";
+  $("cut-hint").textContent = st.status === "queued"
+    ? "A renderer is starting up."
+    : `Every frame drawn, voiced and mixed in the cloud${mins ? `, ${mins} min so far` : ""}. Keep watching the match meanwhile.`;
+  cut.timer = setTimeout(followCut, 4000);
+}
+async function makeCut(e) {
+  e.preventDefault();
+  if (!state.match) return;
+  const body = { match: state.match.match_id, lang: $("cut-lang").value, aspect: cut.aspect };
+  if (cut.focus === "player") body.player = $("cut-player").value; else body.side = cut.side;
+  cutStage("working");
+  $("cut-state").textContent = "Sending your request";
+  $("cut-hint").textContent = "";
+  const r = await fetch("/api/cuts", {
+    method: "POST", credentials: "same-origin",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (r.status === 401) { showGate(); return; }
+  if (!r.ok) {
+    const why = { 429: "You have made a lot of cuts this hour. Try again a little later.", 503: "Cuts are not switched on here." };
+    cutStage("failed", { message: why[r.status] });
+    return;
+  }
+  cut.id = (await r.json()).id;
+  cut.started = Date.now();
+  remember(cut.id);
+  followCut();
+}
+async function shareCut() {
+  try {
+    const blob = await (await fetch(`/media/cuts/${cut.id}.mp4`, { credentials: "same-origin" })).blob();
+    const file = new File([blob], `matchcut-${cut.id}.mp4`, { type: "video/mp4" });
+    await navigator.share({ files: [file], title: "My Matchcut" });
+  } catch { /* the fan closed the share sheet */ }
+}
+function wireCutPanel() {
+  if (cut.wired) return;
+  cut.wired = true;
+  $("cut").addEventListener("submit", makeCut);
+  for (const b of $("cut").querySelectorAll("[data-focus]")) {
+    b.addEventListener("click", () => {
+      cut.focus = b.dataset.focus;
+      pick(b.parentElement, "focus", cut.focus);
+      $("cut-clubs").hidden = cut.focus !== "side";
+      $("cut-player-wrap").hidden = cut.focus !== "player";
+    });
+  }
+  for (const b of $("cut").querySelectorAll("[data-aspect]")) {
+    b.addEventListener("click", () => { cut.aspect = b.dataset.aspect; pick(b.parentElement, "aspect", cut.aspect); });
+  }
+  $("cut-share").addEventListener("click", shareCut);
+  $("cut-again").addEventListener("click", () => { $("cut-video").removeAttribute("src"); cut.id = null; cutStage("idle"); });
+  const resume = remembered();
+  if (resume && /^c-[0-9a-f]{12}$/.test(resume)) { cut.id = resume; cut.started = Date.now(); cutStage("working"); followCut(); }
+}
+
 async function start() {
   $("gate").hidden = true; $("studio").hidden = false;
   resize();
@@ -347,6 +674,7 @@ async function start() {
   $("match").replaceChildren(...list.map((m) => el("option", { value: m.match_id }, m.match_id.toUpperCase())));
   state.list = list;
   if (list.length) await loadMatch(list[0]);
+  wireCutPanel();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -363,8 +691,13 @@ document.addEventListener("DOMContentLoaded", () => {
     $("sound").setAttribute("aria-label", state.sound ? "Commentary sound on" : "Commentary sound off");
     $("sound-icon").setAttribute("href", state.sound ? "#i-sound" : "#i-mute");
     if (!state.sound) { state.audio.pause(); $("sound").classList.remove("speaking"); }
+    state.crowd?.setEnabled(state.sound);
   });
   $("speed").addEventListener("change", () => { state.speed = Number($("speed").value); });
+  $("skip-replay").addEventListener("click", endPackage);
+  $("view-3d").addEventListener("click", () => setView("3d"));
+  $("view-2d").addEventListener("click", () => setView("2d"));
+  $("cam").addEventListener("change", () => state.show?.setMode($("cam").value));
   $("lang").addEventListener("change", async () => { await loadCues(); seek(state.t); });
   $("match").addEventListener("change", () => loadMatch(state.list.find((m) => m.match_id === $("match").value)));
   const scrub = $("scrubber");
@@ -373,11 +706,14 @@ document.addEventListener("DOMContentLoaded", () => {
   document.addEventListener("keydown", (e) => {
     if ($("studio").hidden || e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
     if (e.code === "Space") { e.preventDefault(); setPlaying(!state.playing); }
+    if (e.code === "Escape") endPackage();
     if (e.code === "ArrowRight") seek(state.t + 30000);
     if (e.code === "ArrowLeft") seek(state.t - 30000);
   });
   window.addEventListener("resize", resize);
   state.speed = Number($("speed").value);
+  setView(state.view);
+  for (const ev of ["pointerdown", "keydown"]) document.addEventListener(ev, startCrowd, { once: true });
   requestAnimationFrame(tick);
-  start().catch(() => showGate()); // an existing session skips the gate
+  if (!RENDER) start().catch(() => showGate()); // an existing session skips the gate
 });

@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import json
 import statistics
 import sys
 from collections.abc import Sequence
@@ -23,11 +24,12 @@ from matchcut_sim import build_league, simulate_match
 from matchcut_sim.cli import replay_analytics
 
 from matchcut_insights.brain import AgentBrain, Brain
+from matchcut_insights.calls import build_calls
 from matchcut_insights.facts import MatchContext
 from matchcut_insights.pipeline import InsightsPipeline, MomentReport
 from matchcut_insights.redteam import red_team, report_markdown
 from matchcut_insights.telemetry import configure_telemetry
-from matchcut_insights.voice import AzureSpeech, voice_cues
+from matchcut_insights.voice import AzureSpeech, voice_calls, voice_cues
 
 # list price per 1M tokens for gpt-5-mini Global Standard, USD (input, output); for the cost estimate
 PRICE_PER_M = (0.25, 2.00)
@@ -229,6 +231,20 @@ def cmd_redteam(args: argparse.Namespace) -> None:
     print(md)
 
 
+def cmd_calls(args: argparse.Namespace) -> None:
+    league = build_league()
+    m = simulate_match(league, args.home, args.away, seed=args.seed)
+    names = {p.player_id: p.known_as for p in league.players if p.player_id in set(m.player_ids)}
+    calls = build_calls(m.meta.match_id, m.events, names)
+    if args.voice:
+        voiced = voice_calls(calls, m.meta.match_id, AzureSpeech.from_env(), args.media)
+        print(f"voiced {voiced} calls -> {args.media}/audio/{m.meta.match_id}")
+    out = Path(args.out_dir) / f"{m.meta.match_id}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps([c.as_dict() for c in calls], ensure_ascii=False, indent=0), encoding="utf-8")
+    print(f"{len(calls)} calls in {len({c.language for c in calls})} languages -> {out}")
+
+
 def main(argv: list[str] | None = None) -> None:
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -255,9 +271,19 @@ def main(argv: list[str] | None = None) -> None:
     t = sub.add_parser("redteam", help="plant false claims and measure what the Verifier catches (offline)")
     t.add_argument("--matches", type=int, default=4)
     t.add_argument("--out", default="reports/verifier-redteam.md")
+    c = sub.add_parser("calls", help="write the play-by-play calls for one match (no model needed)")
+    c.add_argument("--home", required=True)
+    c.add_argument("--away", required=True)
+    c.add_argument("--seed", type=int, default=7)
+    c.add_argument("--voice", action="store_true", help="voice the calls with Azure AI Speech")
+    c.add_argument("--media", default="out/media")
+    c.add_argument("--out-dir", default="out/calls")
     args = p.parse_args(argv)
     if args.cmd == "redteam":
         cmd_redteam(args)
+        return
+    if args.cmd == "calls":
+        cmd_calls(args)
         return
     configure_telemetry("matchcut-insights")
     asyncio.run(cmd_run(args) if args.cmd == "run" else cmd_eval(args))

@@ -38,6 +38,8 @@ from matchcut_sim.football import (
 from matchcut_sim.league import League
 
 DT = 0.1
+ACCEL = 4.2  # m/s^2, the most a player's velocity changes per second (sprint starts and turns)
+GOAL_CELEBRATION_S = 35.0  # ball in the net, players celebrate; then kick-off positions
 HZ = 10
 ROLE_FIT: dict[str, list[Position]] = {
     "GK": [Position.GK],
@@ -157,6 +159,7 @@ class _Engine:
         self.poss = 0
         self.flight: _Flight | None = None
         self.dead: dict | None = None
+        self.after_goal: dict | None = None
         self.next_decision = 0.0
         self.carry_dest: tuple[float, float] | None = None
         self.carry_start: tuple[float, float, float] | None = None
@@ -273,6 +276,7 @@ class _Engine:
 
     def start_period(self, period: Literal[1, 2]) -> None:
         self.period = period
+        self.after_goal = None  # a goal on the half-time whistle restarts with the new half
         kicking = 0 if period == 1 else 1
         self.kickoff_positions()
         self.emit(EventType.PERIOD_START)
@@ -416,7 +420,7 @@ class _Engine:
         desired = unit * want[:, None]
         dv = desired - self.vel
         dvn = np.hypot(dv[:, 0], dv[:, 1])
-        cap = 4.2 * DT
+        cap = ACCEL * DT
         scale = np.where(dvn > cap, cap / np.maximum(dvn, 1e-9), 1.0)
         self.vel += dv * scale[:, None]
         self.vel[~self.active] = 0
@@ -521,6 +525,10 @@ class _Engine:
                     np.clip(np.dot(self.pos[cut] - (sx, sy), ab) / max(np.dot(ab, ab), 1e-6), 0.15, 0.95)
                 )
                 ex, ey = sx + ab[0] * tproj, sy + ab[1] * tproj
+                # Known limitation: the interceptor can be a few metres from this point when the ball
+                # arrives (median 3.9 m). Slowing the ball to his arrival (a time-to-intercept model)
+                # was tried on 19 Oct and lifted goals to 4.5 a match (target 2.2 to 3.4), so the
+                # calibrated timing stays; the show camera softens it visually instead.
                 target_slot = cut
             else:
                 kind = "out"
@@ -687,8 +695,17 @@ class _Engine:
                 related_event_id=f.event_id,
                 detail=f"{self.score[0]}-{self.score[1]}",
             )
-            self.kickoff_positions()
-            self.set_dead("kick_off", 1 - team, (LENGTH / 2, WIDTH / 2), wait=55)
+            # the ball rests in the net; kick-off positions are taken later (see run_period)
+            in_net_x = -0.8 if f.ex < LENGTH / 2 else LENGTH + 0.8
+            self.flight = None
+            self.carrier = None
+            self.poss = 1 - team
+            self.ball[:] = (in_net_x, float(np.clip(f.ey, 30.5, 37.5)), 0.0)
+            self.after_goal = {
+                "team": 1 - team,
+                "reset_at": self.t + GOAL_CELEBRATION_S,
+                "kick_at": self.t + 55,
+            }
         elif f.result == "block":
             assert f.target_slot is not None
             eid = self.emit(
@@ -866,6 +883,12 @@ class _Engine:
     def run_period(self, period: Literal[1, 2], end_t: float) -> None:
         self.start_period(period)
         while self.t < end_t or self.flight is not None:
+            if self.after_goal is not None and self.t >= self.after_goal["reset_at"]:
+                ag, self.after_goal = self.after_goal, None
+                self.kickoff_positions()
+                self.set_dead(
+                    "kick_off", ag["team"], (LENGTH / 2, WIDTH / 2), wait=max(0.5, ag["kick_at"] - self.t)
+                )
             if self.dead is not None and self.t >= self.dead["until"]:
                 self.resume()
             if self.carrier is not None and self.dead is None and self.flight is None:

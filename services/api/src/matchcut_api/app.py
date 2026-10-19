@@ -15,6 +15,7 @@ Every response carries strict security headers. Clients are rate limited with th
 from __future__ import annotations
 
 import asyncio
+import gzip
 import hashlib
 import hmac
 import json
@@ -28,7 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from limits import parse
 from limits.storage import MemoryStorage
@@ -38,15 +39,20 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.sessions import SessionMiddleware
 
+from matchcut_api.cuts import ASPECTS, CUT_ID, CUT_LANGUAGES, AzureCuts, CutRequest, CutStore, LocalCuts
+
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")  # BCP 47: en, en-NG, pcm, ar, yo
-AUDIO_NAME = re.compile(r"^CU-\d{5}-[a-z]{2,3}(-[A-Z]{2})?\.mp3$")
+AUDIO_NAME = re.compile(r"^(CU|CA)-\d{5}-[a-z]{2,3}(-[A-Z]{2})?\.mp3$")  # cue lines and play-by-play calls
 COOKIE = "mc_session"
 SESSION_TTL_S = 12 * 3600
+# 'wasm-unsafe-eval' lets the 3D show camera compile its meshopt WebAssembly decoder (it does not
+# allow string evaluation of JavaScript); blob: lets the model loader decode the textures embedded in
+# the character file (blob URLs can only be created by this page)
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; "
-    "img-src 'self' data:; media-src 'self' blob:; "
-    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+    "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; font-src 'self'; "
+    "img-src 'self' data: blob:; media-src 'self' blob:; "
+    "connect-src 'self' blob:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 )
 
 
@@ -61,6 +67,12 @@ class Settings:
     requests_per_minute: int = 120
     streams_per_client: int = 3
     secure_cookie: bool = True
+    calls_dir: Path = Path("out/calls")
+    storage_account: str | None = None  # Azure: fan cuts via the queue-triggered render job
+    render_code: str | None = None  # local development: the code the background renderer signs in with
+    cuts_dir: Path = Path("out/cuts")
+    port: int = 8080
+    cuts_per_hour: int = 6
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -74,6 +86,11 @@ class Settings:
             code_hashes=frozenset(h.strip().lower() for h in codes.split(",") if h.strip()),
             secret=os.environ.get("MATCHCUT_SESSION_SECRET") or secrets.token_urlsafe(32),
             secure_cookie=os.environ.get("MATCHCUT_INSECURE_COOKIE") != "1",
+            calls_dir=Path(os.environ.get("MATCHCUT_CALLS_DIR", "out/calls")),
+            storage_account=os.environ.get("MATCHCUT_STORAGE_ACCOUNT") or None,
+            render_code=os.environ.get("MATCHCUT_RENDER_CODE") or None,
+            cuts_dir=Path(os.environ.get("MATCHCUT_CUTS_DIR", "out/cuts")),
+            port=int(os.environ.get("PORT", "8080")),
         )
 
 
@@ -111,6 +128,14 @@ def _rank(c: Cue, lang: str) -> int:
     )
 
 
+class CutBody(BaseModel):
+    match: str = Field(max_length=24)
+    lang: str = Field(default="en", max_length=8)
+    aspect: str = Field(default="9x16", max_length=5)
+    side: str | None = Field(default=None, max_length=4)
+    player: str | None = Field(default=None, max_length=60)
+
+
 class SessionRequest(BaseModel):
     code: str = Field(min_length=4, max_length=64)
 
@@ -118,7 +143,24 @@ class SessionRequest(BaseModel):
 # ---------------------------------------------------------------- app
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+def byte_range(header: str | None, size: int) -> tuple[int, int] | None:
+    """One `bytes=a-b` range, clamped to the file; None means the whole file. 416 if unsatisfiable."""
+    m = RANGE.match(header.strip()) if header else None
+    if not m or not (m[1] or m[2]):
+        return None
+    if m[1]:
+        start, end = int(m[1]), min(int(m[2]) if m[2] else size - 1, size - 1)
+    else:  # the last N bytes
+        start, end = max(size - int(m[2]), 0), size - 1
+    if start > end or start >= size:
+        raise HTTPException(416, "range not satisfiable", headers={"Content-Range": f"bytes */{size}"})
+    return start, end
+
+
+def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -> FastAPI:
     s = settings or Settings.from_env()
     limiter = MovingWindowRateLimiter(MemoryStorage())
     per_client = parse(f"{s.requests_per_minute}/minute")
@@ -203,6 +245,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def cues(match_id: str, lang: str = "en") -> list[dict]:
         return [json.loads(c.model_dump_json()) for c in load_cues(s, match_id, lang)]
 
+    @app.get("/api/matches/{match_id}/calls", dependencies=[Depends(require_session)])
+    def calls(match_id: str, lang: str = "en") -> list[dict]:
+        """Play-by-play calls (build-up, goal, save, miss) for one language, in match order."""
+        path = s.calls_dir / f"{match_id}.json"
+        if not MATCH_ID.match(match_id) or not LANG.match(lang) or not path.is_file():
+            return []
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        return [r for r in rows if r.get("language") == lang]
+
     @app.get("/api/matches/{match_id}/stream", dependencies=[Depends(require_session)])
     async def stream(request: Request, match_id: str, lang: str = "en", from_ms: int = 0, speed: float = 1.0):
         all_cues = [c for c in load_cues(s, match_id, lang) if c.t_ms >= from_ms]
@@ -234,6 +285,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(404, "not found")
         return FileResponse(
             path, media_type="audio/mpeg", headers={"Cache-Control": "private, max-age=86400"}
+        )
+
+    # ---------------------------------------------------------------- fan cuts
+    store = cuts
+    if store is None and s.storage_account:
+        store = AzureCuts(s.storage_account)
+    elif store is None and s.render_code:
+        store = LocalCuts(s.cuts_dir, f"http://127.0.0.1:{s.port}", s.render_code)
+    per_hour = parse(f"{s.cuts_per_hour}/hour")
+
+    def players_of(match_id: str) -> set[str]:
+        path = s.feeds_dir / f"{match_id}.json.gz"
+        if not path.is_file():
+            return set()
+        feed = json.loads(gzip.decompress(path.read_bytes()))
+        return {p["name"] for p in feed.get("players", {}).values()}
+
+    @app.post("/api/cuts", dependencies=[Depends(require_session)])
+    def make_cut(body: CutBody, request: Request) -> dict[str, str]:
+        """Ask for a personal highlight film: a club (side) or a player, a language, an aspect."""
+        if store is None:
+            raise HTTPException(503, "fan cuts are not configured here")
+        if not MATCH_ID.match(body.match) or body.lang not in CUT_LANGUAGES or body.aspect not in ASPECTS:
+            raise HTTPException(422, "invalid request")
+        if (body.side is None) == (body.player is None) or (body.side and body.side not in ("home", "away")):
+            raise HTTPException(422, "choose a side or a player")
+        if body.player and body.player not in players_of(body.match):
+            raise HTTPException(422, "unknown player")
+        if not limiter.hit(per_hour, f"cuts:{client_id(request)}"):
+            raise HTTPException(429, "too many cuts for now")
+        cut_id = store.submit(CutRequest(body.match, body.lang, body.aspect, body.side, body.player))
+        return {"id": cut_id, "status": "queued"}
+
+    @app.get("/api/cuts/{cut_id}", dependencies=[Depends(require_session)])
+    def cut_status(cut_id: str) -> dict:
+        st = store.status(cut_id) if store and CUT_ID.match(cut_id) else None
+        if st is None:
+            raise HTTPException(404, "not found")
+        return st
+
+    @app.get("/media/cuts/{cut_id}.mp4", dependencies=[Depends(require_session)])
+    def cut_film(cut_id: str, request: Request) -> StreamingResponse:
+        """The finished film, with byte ranges so players can seek."""
+        film = store.film(cut_id) if store and CUT_ID.match(cut_id) else None
+        if film is None:
+            raise HTTPException(404, "not found")
+        headers = {"Cache-Control": "private, max-age=3600", "Accept-Ranges": "bytes"}
+        span = byte_range(request.headers.get("range"), film.size)
+        if span is None:
+            headers["Content-Length"] = str(film.size)
+            return StreamingResponse(film.read(0, film.size - 1), media_type="video/mp4", headers=headers)
+        start, end = span
+        headers["Content-Range"] = f"bytes {start}-{end}/{film.size}"
+        headers["Content-Length"] = str(end - start + 1)
+        return StreamingResponse(
+            film.read(start, end), status_code=206, media_type="video/mp4", headers=headers
         )
 
     @app.get("/media/{match_id}/clip.mp4", dependencies=[Depends(require_session)])

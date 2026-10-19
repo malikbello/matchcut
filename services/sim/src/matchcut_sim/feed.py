@@ -1,4 +1,4 @@
-"""Compact match feed for screens: who is playing, and where everyone is, 5 times a second.
+"""Compact match feed for screens: who is playing, where everyone is 10 times a second, and what they do.
 
 The Studio's 2D data pitch (also the fallback tier of the 3D show camera) draws
 from this. Positions are decimetres as integers to keep the file small; the API
@@ -7,15 +7,19 @@ serves the pre-compressed file as is. Layout:
     {"match_id", "hz", "slots": [team per slot], "players": {id: {num, name}},
      "teams": {home|away: {id, code, name, kit, players: {slot: {id, num, name}}}},
      "t": [ms...], "p": [[x, y, x, y, ... 22 slots ...]...], "b": [[x, y, z]...],
-     "period": [1|2...], "changes": [{t, slot, id}], "goals": [{t, side}], "possession": [home % per minute]}
+     "period": [1|2...], "changes": [{t, slot, id}], "goals": [{t, side}], "possession": [home % per minute],
+     "keepers": [slot...], "events": [[t, type, slot, body_part, outcome, x, y, end_x, end_y, to_slot]...],
+     "cuts": [t...]}
 
-An empty slot (a player sent off) is written as -1, -1.
+An empty slot (a player sent off) is written as EMPTY, EMPTY (-9999): real positions can be negative,
+since players step behind the goal line or off the touchline.
 """
 
 from __future__ import annotations
 
 import gzip
 import json
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +28,8 @@ from matchcut_contracts import EventType, Outcome
 from matchcut_sim.engine import MatchResult
 from matchcut_sim.league import League, match_kits
 
-FEED_HZ = 5
+FEED_HZ = 10  # the engine's native rate: the 3D players need every step
+EMPTY = -9999  # an empty slot; never a real position (decimetres)
 
 
 def build_feed(m: MatchResult, league: League, hz: int = FEED_HZ) -> dict[str, Any]:
@@ -68,7 +73,7 @@ def build_feed(m: MatchResult, league: League, hz: int = FEED_HZ) -> dict[str, A
         row: list[int] = []
         for slot in range(len(m.team_of_slot)):
             if int(m.roster[i, slot]) < 0:
-                row += [-1, -1]
+                row += [EMPTY, EMPTY]
             else:
                 row += [round(float(m.pos[i, slot, 0]) * 10), round(float(m.pos[i, slot, 1]) * 10)]
         frames.append(row)
@@ -89,7 +94,98 @@ def build_feed(m: MatchResult, league: League, hz: int = FEED_HZ) -> dict[str, A
             if e.type == EventType.GOAL
         ],
         "possession": possession_by_minute(m),
+        "keepers": keeper_slots(m, league),
+        "events": action_events(m),
+        "cuts": restart_cuts(m, idx),
     }
+
+
+# On-ball actions the 3D show camera animates. Each row is compact and positional:
+#   [t_ms, type, slot, body_part, outcome, x, y, end_x, end_y, recipient_slot]
+# x/y in decimetres; -1 where a value is missing. The event time is the moment of contact,
+# so an animation's contact frame is aligned to it.
+ANIMATED = {
+    EventType.PASS,
+    EventType.SHOT,
+    EventType.SAVE,
+    EventType.GOAL,
+    EventType.TACKLE,
+    EventType.INTERCEPTION,
+    EventType.CLEARANCE,
+    EventType.BLOCK,
+    EventType.BALL_RECOVERY,
+    EventType.THROW_IN,
+    EventType.CORNER,
+    EventType.GOAL_KICK,
+    EventType.FREE_KICK,
+    EventType.KICK_OFF,
+    EventType.FOUL,
+    EventType.CARD,
+}
+
+
+def _slot_at(m: MatchResult, player_id: str | None, t_ms: int) -> int:
+    """Which feed slot a player occupies at a moment (slots change with substitutions)."""
+    if player_id is None or player_id not in m.player_ids:
+        return -1
+    r = m.player_ids.index(player_id)
+    i = min(int(t_ms // 100), len(m.t_ms) - 1)
+    hits = [s for s in range(m.roster.shape[1]) if int(m.roster[i, s]) == r]
+    return hits[0] if hits else -1
+
+
+def _dm(v: float | None) -> int:
+    return -1 if v is None else round(v * 10)
+
+
+def action_events(m: MatchResult) -> list[list[Any]]:
+    return [
+        [
+            e.t_ms,
+            e.type.value,
+            _slot_at(m, e.player_id, e.t_ms),
+            e.body_part.value if e.body_part else "",
+            e.outcome.value if e.outcome else "",
+            _dm(e.x),
+            _dm(e.y),
+            _dm(e.end_x),
+            _dm(e.end_y),
+            _slot_at(m, e.recipient_id, e.t_ms),
+        ]
+        for e in m.events
+        if e.type in ANIMATED
+    ]
+
+
+def keeper_slots(m: MatchResult, league: League) -> list[int]:
+    """Slots that start in goal (the 3D scene dresses them in the keeper kit)."""
+    return [
+        slot
+        for slot in range(len(m.team_of_slot))
+        if int(m.roster[0, slot]) >= 0
+        and league.player(m.player_ids[int(m.roster[0, slot])]).position.value == "GK"
+    ]
+
+
+def restart_cuts(m: MatchResult, idx: range, jump_m: float = 4.0) -> list[int]:
+    """Times where several players are repositioned at once (restarts after goals, half time).
+
+    A real broadcast cuts away at these moments; the 3D scene cuts too, instead of
+    animating players sliding across the pitch.
+    """
+    frames = list(idx)
+    cuts = []
+    for a, b in pairwise(frames):
+        moved = sum(
+            1
+            for slot in range(len(m.team_of_slot))
+            if int(m.roster[a, slot]) >= 0
+            and int(m.roster[b, slot]) >= 0
+            and float(((m.pos[b, slot] - m.pos[a, slot]) ** 2).sum()) ** 0.5 > jump_m
+        )
+        if moved >= 3:
+            cuts.append(int(m.t_ms[b]))
+    return cuts
 
 
 def possession_by_minute(m: MatchResult) -> list[int]:
