@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D4 (show camera) in progress on `d4/show-camera`, draft PR #8; D3.2 merged (#7)
+**Updated:** Mon 19 Oct 2026 · **Phase:** D5 (fan cuts) and D6 (Azure) in progress on `d4/show-camera`, draft PR #8; D3.2 merged (#7)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -15,7 +15,13 @@
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
-## Resume here (handoff, 19 Oct)
+## Resume here (handoff, 19 Oct, midday)
+- **D5 Export my cut, built:** recap Editor (EDL from the feed, cues and calls), headless renderer on a virtual clock (Playwright, Studio `?render=1`), ffmpeg mix (crowd beds, chant, roars, voiced calls with sidechain ducking, -16 LUFS), CLI `matchcut-recap make`. First film (Kestrel Bay, English, 9:16, about 81 s) rendering locally in `out/cuts/`.
+- **Fan cut flow:** `POST /api/cuts` (club or player, language, format; validated, 6 per hour), `GET /api/cuts/{id}`, `GET /media/cuts/{id}.mp4` (byte ranges); Studio "Your cut" panel (watch, download, share). Local back end renders in a background process; Azure back end uses the `cuts` queue and blob container.
+- **D6 Azure:** `infra/main.bicep` (Log Analytics, App Insights, ACR Basic, user-assigned identity with least-privilege roles, Storage with shared keys off, `cuts` queue and blob, `showcase` blob, Container Apps environment, Studio app scaled to zero, recap Container Apps Job with a KEDA queue trigger on managed identity). `deploy/deploy.sh` (infra, showcase bundle, `az acr build`, apps, smoke test). `.github/workflows/deploy.yml` (OIDC, gated by the `MATCHCUT_DEPLOY_ENABLED` variable). Base infra deployed to `rg-matchcut-dev` on 19 Oct. Production access code and session key live outside the repo in `inside-the-game/.secrets/matchcut-prod.env`.
+- Next: verify the film, regenerate the feed (EMPTY sentinel), build images in ACR, deploy the apps, render a cut on Azure, set up the GitHub OIDC identity.
+
+## Earlier handoff (19 Oct, morning)
 - Branch `d4/show-camera` (draft PR #8). Local preview: `matchcut-api` on port 8765 (access code `studio-preview`); `npm run assets && npm run build` in `apps/studio` first.
 - **Malik's verdict, 19 Oct: the visuals are far below the standard required.** Next is a full visual overhaul (art direction, characters, stadium, crowd, lighting, grading, broadcast graphics), not more features.
 - Engine change pending its realism check: interceptions slow the ball when the interceptor cannot reach it in time (calibrated version), and after a goal the ball rests in the net for 35 s before kick-off positions (the celebration window). Commit only when the 12-match scorecard is 14/14 again.

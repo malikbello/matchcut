@@ -102,3 +102,18 @@ jobs:
         run: |
           uv export --locked --no-hashes --no-emit-workspace --format requirements-txt > requirements-audit.txt
           uvx pip-audit --strict -r requirements-audit.txt
+
+  infra:
+    name: Infrastructure compiles and lints
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bicep build (warnings fail the check)
+        run: |
+          az bicep install
+          az bicep build --file infra/main.bicep --stdout 2> bicep.log > /dev/null
+          cat bicep.log
+          if grep -q "Warning\|Error" bicep.log; then exit 1; fi
+      - name: Deploy script is valid shell
+        run: bash -n deploy/deploy.sh
