@@ -2,6 +2,10 @@
 "use strict";
 
 const $ = (id) => document.getElementById(id);
+// Render mode (films): the clock is virtual, so every frame of an exported cut is reproducible
+const RENDER = new URLSearchParams(location.search).has("render");
+let virtualMs = 0;
+if (RENDER) performance.now = () => virtualMs;
 const KIND = {
   goal: ["Goal", "i-goal"], big_chance: ["Big chance", "i-chance"], great_save: ["Big save", "i-save"],
   momentum_swing: ["Momentum", "i-momentum"], press_surge: ["Pressing", "i-press"],
@@ -205,6 +209,7 @@ function seek(t) {
   updateBug();
 }
 function tick(now) {
+  if (RENDER) return; // films are driven frame by frame by window.__render
   requestAnimationFrame(tick); // schedule first: one bad frame must never stop the clock
   try { step(now); } catch (err) { console.error(err); }
 }
@@ -479,6 +484,67 @@ function scrubTo(evt) {
   const r = $("scrubber").getBoundingClientRect();
   seek(((evt.clientX - r.left) / r.width) * state.end);
 }
+// ------------------------------------------------------------ render mode (films)
+// The recap renderer (services/recap) opens the Studio with ?render and drives it one frame at a
+// time: a title card, live run-ups with the verified cards, goal packages, an end card. CSS
+// animations are stepped by hand so the cut-ins and wipes land on the same frames every time.
+const tracked = new WeakSet();
+function stepAnimations(ms) {
+  for (const a of document.getAnimations()) {
+    if (!tracked.has(a)) {
+      tracked.add(a);
+      a.pause();
+      a.currentTime = 0;
+    } else {
+      a.currentTime = (a.currentTime ?? 0) + ms;
+    }
+  }
+}
+window.__render = {
+  async init({ match, lang, aspect }) {
+    document.body.classList.add("render", `aspect-${aspect}`);
+    $("gate").hidden = true; $("studio").hidden = false;
+    state.sound = false; state.playing = false;
+    $("lang").value = lang;
+    const list = await api("/api/matches");
+    state.list = list;
+    await loadMatch(list.find((m) => m.match_id === match));
+    setView("3d");
+    while (!state.show) await new Promise((r) => setTimeout(r, 100));
+    return { end: state.end, goals: state.feed.goals, moments: state.moments.length };
+  },
+  packageDuration(goalT) {
+    const goal = state.feed.goals.find((g) => g.t === goalT);
+    return goal ? state.show.packageFor(goal).duration : 0;
+  },
+  // seg: { kind: "card" | "live" | "package", t, pt, goalT, title, sub }; index counts output frames
+  frame(seg, index, fps) {
+    virtualMs = (index * 1000) / fps;
+    const card = $("film-card");
+    card.hidden = seg.kind !== "card";
+    if (seg.kind === "card") { $("fc-title").textContent = seg.title || ""; $("fc-sub").textContent = seg.sub || ""; }
+    if (seg.kind === "package") {
+      const goal = state.feed.goals.find((g) => g.t === seg.goalT);
+      if (!state.pkg || state.pkg.goal !== goal) state.pkg = { plan: state.show.packageFor(goal), pt: 0, goal };
+      state.pkg.pt = seg.pt;
+      state.t = goal.t + 600;
+    } else {
+      if (state.pkg) endPackage();
+      const jumped = state.renderPrev === undefined || seg.t < state.renderPrev || seg.t - state.renderPrev > 2000;
+      const before = jumped ? seg.t - 1 : state.renderPrev;
+      if (jumped) { state.shown = null; $("cue").hidden = true; state.show.endPackage(); }
+      if (seg.kind === "live") for (const c of state.moments) if (c.t_ms > before && c.t_ms <= seg.t) showCue(c);
+      state.t = seg.t;
+      state.renderPrev = seg.t;
+      if (state.shown && virtualMs - state.shownAt > CUE_SECONDS * 1000) hideCue();
+    }
+    updateBug();
+    draw();
+    stepAnimations(1000 / fps);
+    return true;
+  },
+};
+
 async function start() {
   $("gate").hidden = true; $("studio").hidden = false;
   resize();
@@ -526,5 +592,5 @@ document.addEventListener("DOMContentLoaded", () => {
   setView(state.view);
   for (const ev of ["pointerdown", "keydown"]) document.addEventListener(ev, startCrowd, { once: true });
   requestAnimationFrame(tick);
-  start().catch(() => showGate()); // an existing session skips the gate
+  if (!RENDER) start().catch(() => showGate()); // an existing session skips the gate
 });

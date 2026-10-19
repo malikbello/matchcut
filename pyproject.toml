@@ -9,7 +9,7 @@ readme = "README.md"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/contracts", "packages/analytics", "services/sim", "services/league-memory", "services/renderer", "services/insights", "services/api"]
+members = ["packages/contracts", "packages/analytics", "services/sim", "services/league-memory", "services/renderer", "services/insights", "services/api", "services/recap"]
 
 [tool.uv.sources]
 matchcut-contracts = { workspace = true }
@@ -19,6 +19,7 @@ matchcut-memory = { workspace = true }
 matchcut-renderer = { workspace = true }
 matchcut-insights = { workspace = true }
 matchcut-api = { workspace = true }
+matchcut-recap = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -29,6 +30,7 @@ dev = [
   "matchcut-renderer",
   "matchcut-insights",
   "matchcut-api",
+  "matchcut-recap",
   "httpx>=0.28",
   "common-data-format-validator>=0.1.1",
   "pytest>=8.3",

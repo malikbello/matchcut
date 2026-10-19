@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 from xml.sax.saxutils import escape
@@ -64,6 +66,26 @@ def ssml(text: str, lang: str, voice: str, style: str | None = None, lift: bool 
     )
 
 
+def cached_token(credential: object, scope: str, margin_s: int = 300) -> Callable[[], str]:
+    """One Entra token shared by every worker, refreshed five minutes before it expires.
+
+    Parallel voicing would otherwise ask the credential (for a developer, the Azure CLI) for a
+    token on every request at once, which the CLI cannot serve.
+    """
+    lock = threading.Lock()
+    held: dict[str, object] = {}
+
+    def get() -> str:
+        with lock:
+            tok = held.get("t")
+            if tok is None or tok.expires_on - margin_s < time.time():  # type: ignore[attr-defined]
+                tok = credential.get_token(scope)  # type: ignore[attr-defined]
+                held["t"] = tok
+            return tok.token  # type: ignore[attr-defined]
+
+    return get
+
+
 class AzureSpeech:
     """Calls the Speech REST endpoint of our Foundry (AI Services) resource with an Entra token."""
 
@@ -79,11 +101,10 @@ class AzureSpeech:
     def from_env(cls) -> AzureSpeech:
         from azure.identity import DefaultAzureCredential  # noqa: PLC0415 - only when voicing
 
-        credential = DefaultAzureCredential()
         return cls(
             os.environ["AZURE_OPENAI_ENDPOINT"],
             os.environ["AZURE_SPEECH_RESOURCE_ID"],
-            lambda: credential.get_token("https://cognitiveservices.azure.com/.default").token,
+            cached_token(DefaultAzureCredential(), "https://cognitiveservices.azure.com/.default"),
         )
 
     def synthesize(
