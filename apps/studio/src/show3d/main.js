@@ -147,7 +147,7 @@ export async function createShow({
 
   scene.add(buildPitch(renderer));
   const kits = [feed.teams.home.kit.primary, feed.teams.away.kit.primary];
-  const stadium = buildStadium({ crowdCount: TIERS.high.crowd, kits });
+  const stadium = buildStadium({ crowdCount: TIERS.high.crowd, kits, assets });
   scene.add(stadium.group);
 
   const lib = await loadLibrary({ privateBase: privateAssets, publicBase: assets });
