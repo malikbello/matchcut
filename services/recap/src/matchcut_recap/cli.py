@@ -76,7 +76,7 @@ def _durations(files: set[str], media_root: Path, ffprobe: str) -> dict[str, flo
     return out
 
 
-def cmd_make(a: argparse.Namespace) -> None:
+def cmd_make(a: argparse.Namespace) -> Path:
     root = Path(a.data)
     feed = json.loads(gzip.decompress((root / "feeds" / f"{a.match}.json.gz").read_bytes()))
     cues = _cues(root / "insights" / f"{a.match}.jsonl", a.lang)
@@ -125,6 +125,7 @@ def cmd_make(a: argparse.Namespace) -> None:
     for tmp in (video, audio):
         tmp.unlink(missing_ok=True)
     print(f"film -> {final}")
+    return final
 
 
 def main(argv: list[str] | None = None) -> None:

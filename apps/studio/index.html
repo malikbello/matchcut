@@ -137,6 +137,39 @@
     </section>
 
     <aside class="rail" aria-label="Moments">
+      <form id="cut" class="cut-panel" autocomplete="off" hidden>
+        <div class="cut-head">
+          <h2>Your cut</h2>
+          <p class="muted small">Your club or your player, in your language, voiced, captioned and ready to share.</p>
+        </div>
+        <div class="seg" role="radiogroup" aria-label="Whose story">
+          <button type="button" role="radio" aria-checked="true" data-focus="side">Club</button>
+          <button type="button" role="radio" aria-checked="false" data-focus="player">Player</button>
+        </div>
+        <div class="cut-clubs" id="cut-clubs" role="radiogroup" aria-label="Club"></div>
+        <label class="select cut-field" id="cut-player-wrap" hidden><span class="sr-only">Player</span><select id="cut-player"></select></label>
+        <div class="cut-row">
+          <label class="select cut-field"><span class="sr-only">Commentary language</span><select id="cut-lang"></select></label>
+          <div class="seg compact" role="radiogroup" aria-label="Format">
+            <button type="button" role="radio" aria-checked="true" data-aspect="9x16"><span class="ar portrait" aria-hidden="true"></span>Phone</button>
+            <button type="button" role="radio" aria-checked="false" data-aspect="16x9"><span class="ar landscape" aria-hidden="true"></span>Wide</button>
+          </div>
+        </div>
+        <button type="submit" class="primary" id="cut-go">Make my cut</button>
+        <div id="cut-progress" class="cut-progress" role="status" aria-live="polite" hidden>
+          <div class="cut-meter"><span></span></div>
+          <p><strong id="cut-state">Queued</strong> <span class="muted small" id="cut-hint"></span></p>
+        </div>
+        <div id="cut-result" class="cut-result" hidden>
+          <video id="cut-video" controls playsinline preload="metadata"></video>
+          <div class="cut-actions">
+            <a class="ghost" id="cut-download" download>Download</a>
+            <button type="button" class="ghost" id="cut-share">Share</button>
+            <button type="button" class="ghost" id="cut-again">New cut</button>
+          </div>
+        </div>
+        <p id="cut-error" class="error small" role="alert" hidden></p>
+      </form>
       <div class="rail-head"><h2>Moments</h2><span class="muted small" id="rail-count"></span></div>
       <ol id="timeline" class="timeline"></ol>
     </aside>

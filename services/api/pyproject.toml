@@ -10,6 +10,9 @@ dependencies = [
     "sse-starlette>=3.0",
     "itsdangerous>=2.2",
     "limits>=5.0",
+    "azure-identity>=1.26",
+    "azure-storage-blob>=12.24",
+    "azure-storage-queue>=12.12",
 ]
 
 [project.scripts]

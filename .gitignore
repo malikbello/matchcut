@@ -50,3 +50,6 @@ assets-cc0/
 
 # Mixamo-derived build output: licensed for use in the product, never committed
 apps/studio/assets/private/
+
+# deploy bundle (match data + licensed library), built and removed by deploy/deploy.sh
+showcase.tar.gz

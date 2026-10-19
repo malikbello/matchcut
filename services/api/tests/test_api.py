@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from matchcut_api import Settings, create_app
 from matchcut_api.app import sha256
+from matchcut_api.cuts import Film
 from matchcut_contracts import Cue, CueStatus, MomentKind
 
 CODE = "kickoff-2026"
@@ -160,3 +161,105 @@ def test_studio_files_revalidate(settings, tmp_path):
     r = TestClient(create_app(settings)).get("/")
     assert r.status_code == 200
     assert r.headers["cache-control"] == "no-cache"
+
+
+# ---------------------------------------------------------------- fan cuts
+
+
+class FakeCuts:
+    def __init__(self):
+        self.requests = []
+
+    def submit(self, req):
+        self.requests.append(req)
+        return "c-0123456789ab"
+
+    def status(self, cut_id):
+        return {"id": cut_id, "status": "done"} if cut_id == "c-0123456789ab" else None
+
+    def film(self, cut_id):
+        data = b"mp4-bytes"
+        return Film(len(data), lambda a, b: iter([data[a : b + 1]])) if cut_id == "c-0123456789ab" else None
+
+
+@pytest.fixture
+def cuts_client(settings):
+    players = b'{"match_id": "kes-wcr-7", "t": [0], "players": {"p00001": {"num": 9, "name": "Quinouani"}}}'
+    (settings.feeds_dir / f"{MATCH}.json.gz").write_bytes(gzip.compress(players))
+    store = FakeCuts()
+    return TestClient(create_app(settings, cuts=store)), store
+
+
+def test_cuts_need_a_session(cuts_client):
+    client, _ = cuts_client
+    assert client.post("/api/cuts", json={"match": MATCH, "side": "home"}).status_code == 401
+    assert client.get("/api/cuts/c-0123456789ab").status_code == 401
+    assert client.get("/media/cuts/c-0123456789ab.mp4").status_code == 401
+
+
+def test_a_cut_is_queued_followed_and_watched(cuts_client):
+    client, store = cuts_client
+    _login(client)
+    r = client.post("/api/cuts", json={"match": MATCH, "player": "Quinouani", "lang": "fr", "aspect": "16x9"})
+    assert r.json() == {"id": "c-0123456789ab", "status": "queued"}
+    assert store.requests[0].player == "Quinouani"
+    assert store.requests[0].lang == "fr"
+    assert client.get("/api/cuts/c-0123456789ab").json()["status"] == "done"
+    film = client.get("/media/cuts/c-0123456789ab.mp4")
+    assert film.content == b"mp4-bytes"
+    assert film.headers["content-type"] == "video/mp4"
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"match": MATCH},  # neither a side nor a player
+        {"match": MATCH, "side": "home", "player": "Quinouani"},  # both
+        {"match": MATCH, "side": "both"},
+        {"match": MATCH, "player": "Nobody"},
+        {"match": MATCH, "side": "home", "aspect": "4x3"},
+        {"match": MATCH, "side": "home", "lang": "../x"},
+        {"match": MATCH, "side": "home", "lang": "yo"},  # captions only until the voice is ready
+        {"match": "../../etc", "side": "home"},
+    ],
+)
+def test_bad_cut_requests_are_refused(cuts_client, body):
+    client, store = cuts_client
+    _login(client)
+    assert client.post("/api/cuts", json=body).status_code == 422
+    assert store.requests == []
+
+
+def test_cut_ids_are_checked_before_any_lookup(cuts_client):
+    client, _ = cuts_client
+    _login(client)
+    for bad in ("c-unknown", "..%2Fsecret", "c-0123456789aZ"):
+        assert client.get(f"/api/cuts/{bad}").status_code == 404
+    assert client.get("/api/cuts/c-ffffffffffff").status_code == 404
+
+
+def test_cuts_are_rate_limited(settings):
+    settings.cuts_per_hour = 2
+    store = FakeCuts()
+    client = TestClient(create_app(settings, cuts=store))
+    _login(client)
+    codes = [client.post("/api/cuts", json={"match": MATCH, "side": "home"}).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+
+
+def test_cuts_are_unavailable_without_a_back_end(client):
+    _login(client)
+    assert client.post("/api/cuts", json={"match": MATCH, "side": "home"}).status_code == 503
+
+
+def test_films_answer_byte_ranges_so_players_can_seek(cuts_client):
+    client, _ = cuts_client
+    _login(client)
+    url = "/media/cuts/c-0123456789ab.mp4"
+    assert client.get(url).headers["accept-ranges"] == "bytes"
+    part = client.get(url, headers={"Range": "bytes=4-6"})
+    assert part.status_code == 206
+    assert part.content == b"byt"
+    assert part.headers["content-range"] == "bytes 4-6/9"
+    assert client.get(url, headers={"Range": "bytes=-3"}).content == b"tes"
+    assert client.get(url, headers={"Range": "bytes=50-"}).status_code == 416

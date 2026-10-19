@@ -171,6 +171,40 @@ body.render.aspect-9x16 .goal-strap { bottom: 14%; transform: translateX(-50%) s
 .timeline .goal .icon { color: var(--signal); }
 .timeline .x { font-size: 14px; line-height: 1.4; }
 
+/* your cut: the fan's own film */
+.cut-panel { display: grid; gap: 12px; padding: 16px; margin: -2px -2px 18px; border-radius: var(--r-card); background: linear-gradient(160deg, rgba(255, 74, 46, 0.16), rgba(255, 74, 46, 0) 55%), var(--ink-900); border: 1px solid var(--ink-700); position: relative; overflow: hidden; }
+.cut-panel::before { content: ""; position: absolute; inset: 0 auto auto 0; width: 64px; height: 3px; background: var(--signal); }
+.cut-head h2 { font: 900 26px/1 var(--display); text-transform: uppercase; margin: 0 0 4px; letter-spacing: 0.02em; }
+.cut-head p { margin: 0; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 10px; background: var(--ink-950); border: 1px solid var(--ink-700); }
+.seg button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 7px; padding: 8px 10px; background: transparent; color: var(--mist); font: 700 13px var(--ui); cursor: pointer; transition: background var(--cut-in), color var(--cut-in); }
+.seg button[aria-checked="true"] { background: var(--ink-700); color: var(--chalk); }
+.seg.compact button { padding: 7px 8px; }
+.ar { display: inline-block; border: 1.75px solid currentColor; border-radius: 2px; }
+.ar.portrait { width: 9px; height: 15px; }
+.ar.landscape { width: 15px; height: 9px; }
+.cut-clubs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.club { display: grid; grid-template-columns: 10px 1fr; gap: 2px 10px; align-items: center; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--ink-700); background: var(--ink-800); color: var(--chalk); cursor: pointer; transition: border-color var(--cut-in), transform var(--cut-in); }
+.club:hover { transform: translateY(-1px); }
+.club .kit { grid-row: span 2; width: 10px; height: 34px; border-radius: 3px; }
+.club .code { font: 900 20px/1 var(--display); letter-spacing: 0.04em; }
+.club .name { font-size: 12px; color: var(--mist); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.club[aria-checked="true"] { border-color: var(--chalk); box-shadow: inset 0 0 0 1px var(--chalk); }
+.cut-field select { width: 100%; }
+.cut-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; }
+.cut-panel .primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.cut-panel .primary[disabled] { opacity: 0.55; cursor: progress; transform: none; }
+.cut-progress p { margin: 8px 0 0; }
+.cut-meter { height: 6px; border-radius: 3px; background: var(--ink-700); overflow: hidden; }
+.cut-meter span { display: block; height: 100%; width: 34%; border-radius: 3px; background: linear-gradient(90deg, var(--signal), var(--floodlight)); animation: meter 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@keyframes meter { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.cut-result { display: grid; gap: 10px; }
+.cut-result video { width: 100%; max-height: 520px; border-radius: 10px; background: #000; border: 1px solid var(--ink-700); }
+.cut-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ghost { display: inline-flex; justify-content: center; padding: 9px 10px; border-radius: var(--r-chip); border: 1px solid var(--ink-600); background: transparent; color: var(--chalk); font: 700 13px var(--ui); text-decoration: none; cursor: pointer; }
+.ghost:hover { border-color: var(--chalk); }
+.cut-panel .error { margin: 0; }
+
 /* Arabic: its own typeface, and the card reads right to left (the pitch never mirrors) */
 :lang(ar) { font-family: 'IBM Plex Sans Arabic', var(--ui); }
 .cue-text:lang(ar) { font: 700 clamp(18px, 2vw, 26px)/1.5 'IBM Plex Sans Arabic', var(--ui); letter-spacing: 0; }
@@ -190,6 +224,7 @@ body.render.aspect-9x16 .goal-strap { bottom: 14%; transform: translateX(-50%) s
 }
 @media (prefers-reduced-motion: reduce) {
   .cue, .timeline li { animation: fade 120ms both; }
+  .cut-meter span { animation: none; width: 100%; opacity: 0.6; }
   .stamp::after, .chip.live .dot, .clock .dot, .score.bump { animation: none; }
   @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 }

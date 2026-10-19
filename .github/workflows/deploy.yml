@@ -1,0 +1,95 @@
+name: Deploy
+
+# Releases Matchcut to Azure Container Apps. GitHub signs in with OpenID Connect as the
+# release identity (a managed identity with a federated credential: no secret exists), fetches
+# the showcase bundle from private Blob Storage, builds both images, pushes them to the
+# registry, rolls out new revisions and smoke-tests the live Studio.
+# Infrastructure itself is applied from a workstation with deploy/deploy.sh.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ${{ vars.MATCHCUT_REGISTRY }}
+  TAG: ${{ github.sha }}
+
+jobs:
+  release:
+    name: Build, push, roll out
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: production
+    if: vars.MATCHCUT_DEPLOY_ENABLED == 'true'  # switched on once deploy/deploy.sh has run
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sign in to Azure (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Showcase bundle (match data and licensed library, never in git)
+        run: |
+          az storage blob download --auth-mode login --account-name "${{ vars.MATCHCUT_STORAGE }}" \
+            -c showcase -n showcase.tar.gz -f showcase.tar.gz -o none
+          tar -xzf showcase.tar.gz && rm showcase.tar.gz
+
+      - name: Registry sign-in (token from the OIDC session)
+        run: az acr login -n "${REGISTRY%%.*}"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Studio and API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/api.Dockerfile
+          push: true
+          provenance: false
+          tags: ${{ env.REGISTRY }}/matchcut-api:${{ env.TAG }},${{ env.REGISTRY }}/matchcut-api:latest
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - name: Render job image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/recap.Dockerfile
+          push: true
+          provenance: false
+          tags: ${{ env.REGISTRY }}/matchcut-recap:${{ env.TAG }},${{ env.REGISTRY }}/matchcut-recap:latest
+          cache-from: type=gha,scope=recap
+          cache-to: type=gha,mode=max,scope=recap
+
+      - name: Roll out new revisions
+        id: rollout
+        run: |
+          rg="${{ vars.MATCHCUT_RG }}"
+          if ! az containerapp show -g "$rg" -n ca-matchcut-studio -o none 2>/dev/null; then
+            echo "::notice::Images pushed. First release: run deploy/deploy.sh to create the apps."
+            exit 0
+          fi
+          az containerapp update -g "$rg" -n ca-matchcut-studio --image "$REGISTRY/matchcut-api:$TAG" -o none
+          az containerapp job update -g "$rg" -n caj-matchcut-recap --image "$REGISTRY/matchcut-recap:$TAG" -o none
+          fqdn=$(az containerapp show -g "$rg" -n ca-matchcut-studio --query properties.configuration.ingress.fqdn -o tsv)
+          echo "url=https://$fqdn" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test
+        if: steps.rollout.outputs.url != ''
+        run: |
+          for _ in $(seq 1 30); do
+            if curl -fsS "${{ steps.rollout.outputs.url }}/healthz"; then exit 0; fi
+            sleep 10
+          done
+          exit 1

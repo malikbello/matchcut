@@ -120,6 +120,7 @@ async function loadMatch(match) {
     $("home-kit").style.background = home.kit.primary; $("away-kit").style.background = away.kit.primary;
     state.end = state.feed.t[state.feed.t.length - 1];
   }
+  buildCutPanel();
   await loadCues();
   seek(0);
   if (state.view === "3d") startShow();
@@ -545,6 +546,127 @@ window.__render = {
   },
 };
 
+// ------------------------------------------------------------ your cut
+// A fan's own film: club or player, language, format. The request goes to the render
+// job (a queue-triggered Container Apps Job on Azure); the panel follows it until the
+// film is ready to watch, download and share. One cut is remembered per tab.
+const CUT_LANGS = ["en", "en-NG", "pcm", "fr", "es", "pt", "ar"]; // languages with voiced calls today
+const cut = { focus: "side", side: "home", aspect: "9x16", id: null, timer: 0, started: 0 };
+const remember = (id) => { try { id ? sessionStorage.setItem("matchcut.cut", id) : sessionStorage.removeItem("matchcut.cut"); } catch { /* storage is optional */ } };
+const remembered = () => { try { return sessionStorage.getItem("matchcut.cut"); } catch { return null; } };
+function pick(group, attr, value) {
+  for (const b of group.querySelectorAll("[role=radio]")) b.setAttribute("aria-checked", String(b.dataset[attr] === value));
+}
+function buildCutPanel() {
+  const feed = state.feed;
+  $("cut").hidden = !feed || RENDER;
+  if (!feed) return;
+  $("cut-clubs").replaceChildren(...["home", "away"].map((side) => {
+    const team = feed.teams[side];
+    const b = el("button", { type: "button", role: "radio", class: "club", "data-side": side, "aria-checked": String(cut.side === side) });
+    const kit = el("span", { class: "kit" }); kit.style.background = team.kit.primary;
+    b.append(kit, el("span", { class: "code" }, team.code), el("span", { class: "name" }, team.name));
+    b.addEventListener("click", () => { cut.side = side; pick($("cut-clubs"), "side", side); });
+    return b;
+  }));
+  const groups = ["home", "away"].map((side) => {
+    const team = feed.teams[side];
+    const ids = new Set(Object.values(team.players).map((p) => p.id));
+    for (const c of feed.changes || []) if (c.id && feed.slots[c.slot] === team.id) ids.add(c.id);
+    const names = [...ids].map((id) => feed.players[id]).filter(Boolean).sort((x, y) => x.num - y.num);
+    const g = el("optgroup", { label: team.name });
+    g.append(...names.map((pl) => el("option", { value: pl.name }, `${pl.num}  ${pl.name}`)));
+    return g;
+  });
+  $("cut-player").replaceChildren(...groups);
+  const labels = Object.fromEntries([...$("lang").options].map((o) => [o.value, o.textContent]));
+  $("cut-lang").replaceChildren(...CUT_LANGS.map((l) => el("option", { value: l }, labels[l] || l)));
+  $("cut-lang").value = CUT_LANGS.includes($("lang").value) ? $("lang").value : "en";
+}
+function cutStage(stage, detail = {}) {
+  $("cut-progress").hidden = stage !== "working";
+  $("cut-result").hidden = stage !== "done";
+  $("cut-error").hidden = stage !== "failed";
+  $("cut-go").disabled = stage === "working";
+  $("cut-go").hidden = stage === "done";
+  if (stage === "failed") $("cut-error").textContent = detail.message || "That cut could not be made. Try again.";
+  if (stage === "done") {
+    const src = `/media/cuts/${cut.id}.mp4`;
+    $("cut-video").src = src;
+    $("cut-download").href = src;
+    $("cut-download").setAttribute("download", `matchcut-${cut.id}.mp4`);
+    $("cut-share").hidden = !(navigator.canShare && navigator.canShare({ files: [new File([""], "x.mp4", { type: "video/mp4" })] }));
+  }
+}
+async function followCut() {
+  clearTimeout(cut.timer);
+  if (!cut.id) return;
+  let st;
+  try { st = await api(`/api/cuts/${cut.id}`); }
+  catch (err) {
+    if (String(err.message).includes("404")) { remember(null); cut.id = null; cutStage("idle"); return; }
+    cut.timer = setTimeout(followCut, 5000); return; // a blip: keep following
+  }
+  if (st.status === "done") { remember(null); cutStage("done"); return; }
+  if (st.status === "failed") { remember(null); cutStage("failed"); return; }
+  const mins = Math.floor((Date.now() - cut.started) / 60000);
+  $("cut-state").textContent = st.status === "queued" ? "In the queue" : "Rendering your film";
+  $("cut-hint").textContent = st.status === "queued"
+    ? "A renderer is starting up."
+    : `Every frame drawn, voiced and mixed in the cloud${mins ? `, ${mins} min so far` : ""}. Keep watching the match meanwhile.`;
+  cut.timer = setTimeout(followCut, 4000);
+}
+async function makeCut(e) {
+  e.preventDefault();
+  if (!state.match) return;
+  const body = { match: state.match.match_id, lang: $("cut-lang").value, aspect: cut.aspect };
+  if (cut.focus === "player") body.player = $("cut-player").value; else body.side = cut.side;
+  cutStage("working");
+  $("cut-state").textContent = "Sending your request";
+  $("cut-hint").textContent = "";
+  const r = await fetch("/api/cuts", {
+    method: "POST", credentials: "same-origin",
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (r.status === 401) { showGate(); return; }
+  if (!r.ok) {
+    const why = { 429: "You have made a lot of cuts this hour. Try again a little later.", 503: "Cuts are not switched on here." };
+    cutStage("failed", { message: why[r.status] });
+    return;
+  }
+  cut.id = (await r.json()).id;
+  cut.started = Date.now();
+  remember(cut.id);
+  followCut();
+}
+async function shareCut() {
+  try {
+    const blob = await (await fetch(`/media/cuts/${cut.id}.mp4`, { credentials: "same-origin" })).blob();
+    const file = new File([blob], `matchcut-${cut.id}.mp4`, { type: "video/mp4" });
+    await navigator.share({ files: [file], title: "My Matchcut" });
+  } catch { /* the fan closed the share sheet */ }
+}
+function wireCutPanel() {
+  if (cut.wired) return;
+  cut.wired = true;
+  $("cut").addEventListener("submit", makeCut);
+  for (const b of $("cut").querySelectorAll("[data-focus]")) {
+    b.addEventListener("click", () => {
+      cut.focus = b.dataset.focus;
+      pick(b.parentElement, "focus", cut.focus);
+      $("cut-clubs").hidden = cut.focus !== "side";
+      $("cut-player-wrap").hidden = cut.focus !== "player";
+    });
+  }
+  for (const b of $("cut").querySelectorAll("[data-aspect]")) {
+    b.addEventListener("click", () => { cut.aspect = b.dataset.aspect; pick(b.parentElement, "aspect", cut.aspect); });
+  }
+  $("cut-share").addEventListener("click", shareCut);
+  $("cut-again").addEventListener("click", () => { $("cut-video").removeAttribute("src"); cut.id = null; cutStage("idle"); });
+  const resume = remembered();
+  if (resume && /^c-[0-9a-f]{12}$/.test(resume)) { cut.id = resume; cut.started = Date.now(); cutStage("working"); followCut(); }
+}
+
 async function start() {
   $("gate").hidden = true; $("studio").hidden = false;
   resize();
@@ -552,6 +674,7 @@ async function start() {
   $("match").replaceChildren(...list.map((m) => el("option", { value: m.match_id }, m.match_id.toUpperCase())));
   state.list = list;
   if (list.length) await loadMatch(list[0]);
+  wireCutPanel();
 }
 
 document.addEventListener("DOMContentLoaded", () => {
