@@ -8,6 +8,8 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+import { GTAOPass } from "three/addons/postprocessing/GTAOPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { Director } from "./camera.js";
 import { buildPitch, L, toWorld, W } from "./pitch.js";
@@ -89,6 +91,26 @@ function eventNear(list, t, before = 2600, after = 3400) {
   }
   return null;
 }
+
+// The broadcast grade, applied after tone mapping: floodlit football on TV has cool shadows and
+// warm highlights, a little extra saturation, a soft vignette and fine grain.
+const GradeShader = {
+  uniforms: { tDiffuse: { value: null }, uTime: { value: 0 }, uGrain: { value: 0.022 } },
+  vertexShader: "varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }",
+  fragmentShader: `uniform sampler2D tDiffuse; uniform float uTime; uniform float uGrain; varying vec2 vUv;
+    float hash(vec2 p){ return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+    void main(){
+      vec3 c = texture2D(tDiffuse, vUv).rgb;
+      float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+      c = mix(vec3(l), c, 1.08);                                             // saturation
+      c += mix(vec3(-0.012, 0.0, 0.018), vec3(0.02, 0.008, -0.012), smoothstep(0.15, 0.75, l)); // split tone
+      c = (c - 0.5) * 1.04 + 0.5;                                            // contrast
+      vec2 d = vUv - 0.5;
+      c *= 1.0 - 0.32 * dot(d, d) * 2.0;                                     // vignette
+      c += (hash(vUv * 1024.0 + uTime) - 0.5) * uGrain;                      // grain
+      gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+    }`,
+};
 
 function ballMesh() {
   const cv = document.createElement("canvas");
@@ -174,9 +196,16 @@ export async function createShow({
   const director = new Director(camera);
   const composer = new EffectComposer(renderer);
   composer.addPass(new RenderPass(scene, camera));
+  // contact shadows: players sit on the grass instead of floating (High tier only)
+  const gtao = new GTAOPass(scene, camera, 1024, 576);
+  gtao.updateGtaoMaterial({ radius: 0.6, distanceExponent: 1.5, thickness: 1.2, scale: 1.0 });
+  gtao.blendIntensity = 0.85;
+  composer.addPass(gtao);
   const bloom = new UnrealBloomPass(new THREE.Vector2(1024, 576), 0.4, 0.45, 0.95); // floodlights and LED boards only
   composer.addPass(bloom);
   composer.addPass(new OutputPass());
+  const grade = new ShaderPass(GradeShader);
+  composer.addPass(grade);
 
   function applyTier() {
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, tier.pixelRatio));
@@ -186,6 +215,7 @@ export async function createShow({
     key.shadow.map?.dispose();
     key.shadow.map = null;
     bloom.enabled = tier.bloom;
+    gtao.enabled = tierName === "high";
     stadium.crowd.mesh.count = tier.crowd;
     resize();
   }
@@ -327,6 +357,7 @@ export async function createShow({
   }
 
   function finish(wallDt, excitement, focus) {
+    grade.uniforms.uTime.value = wallClock % 100;
     animateCrowd(stadium.crowd, wallClock, excitement);
     director.update(focus ?? ball.position, wallDt);
     composer.render();
