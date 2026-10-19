@@ -61,6 +61,19 @@ button.primary:hover { transform: translateY(-1px); }
 .screen canvas[hidden] { display: none; }
 .show-loading { position: absolute; inset: auto auto 18px 18px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--r-chip); background: rgba(7, 9, 13, 0.8); color: var(--mist); font: 600 12px var(--ui); letter-spacing: 0.04em; }
 .show-loading .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--floodlight); animation: pulse 1.2s ease-in-out infinite; }
+/* render mode: the screen alone, full frame, for exported films (16:9 or 9:16) */
+body.render .bar, body.render .rail, body.render .transport, body.render .evidence, body.render #skip-replay, body.render .show-loading { display: none !important; }
+body.render .studio { display: block; padding: 0; max-width: none; }
+body.render .screen { position: fixed; inset: 0; border-radius: 0; border: 0; aspect-ratio: auto; box-shadow: none; }
+body.render.aspect-9x16 .cue { left: 4%; right: 4%; bottom: 7%; }
+body.render.aspect-9x16 .goal-strap { bottom: 14%; transform: translateX(-50%) scale(0.9); }
+/* film cards: the title at the start of a cut and the result at the end */
+.film-card { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; background: radial-gradient(120% 90% at 50% 40%, rgba(12, 16, 22, 0.78), rgba(7, 9, 13, 0.96)); text-align: center; padding: 6%; }
+.film-card .fc-mark { font: 900 clamp(34px, 6vw, 84px)/1 var(--display); letter-spacing: 0.04em; color: var(--chalk); }
+.film-card .fc-mark span { color: var(--signal); display: inline-block; transform: skewX(-14deg); }
+.film-card .fc-title { font: 900 clamp(30px, 5vw, 72px)/1.05 var(--display); text-transform: uppercase; color: var(--chalk); max-width: 18ch; animation: cutIn 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.film-card .fc-sub { font: 600 clamp(14px, 1.8vw, 24px)/1.3 var(--ui); color: var(--mist); letter-spacing: 0.04em; max-width: 34ch; }
+
 /* player ID tag: tracks the player's head in the 3D view */
 .player-tag { position: absolute; transform: translate(-50%, -100%); display: inline-flex; align-items: stretch; background: rgba(7, 9, 13, 0.9); border-radius: 6px; overflow: hidden; pointer-events: none; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); animation: tagIn var(--cut-in) both; }
 .player-tag .bar { width: 5px; background: var(--home); }
