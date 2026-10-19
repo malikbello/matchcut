@@ -135,6 +135,7 @@ function ballMesh() {
 
 export async function createShow({
   canvas, feed, assets = "assets/3d", privateAssets = "assets/private", quality = "high", onQuality = () => {},
+  adaptive = true, // live viewing steps quality down on slow devices; films never change quality mid-cut
 }) {
   if (!webglAvailable()) throw new Error("WebGL2 unavailable");
   let tierName = quality;
@@ -216,7 +217,7 @@ export async function createShow({
     key.shadow.map?.dispose();
     key.shadow.map = null;
     bloom.enabled = tier.bloom;
-    gtao.enabled = tierName === "high";
+    gtao.enabled = tier.gtao;
     stadium.crowd.mesh.count = tier.crowd;
     resize();
   }
@@ -248,7 +249,7 @@ export async function createShow({
     const wallDt = Math.min(0.1, (now - lastWall) / 1000);
     lastWall = now;
     wallClock += wallDt;
-    if (governor.sample(now, wallDt * 1000)) {
+    if (adaptive && ORDER.includes(tierName) && governor.sample(now, wallDt * 1000)) {
       const next = ORDER[ORDER.indexOf(tierName) + 1];
       if (next) {
         tierName = next;
@@ -462,10 +463,12 @@ export async function createShow({
     get quality() {
       return tierName;
     },
-    setQuality(name) {
-      if (!TIERS[name]) return;
-      tierName = name;
-      tier = TIERS[name];
+    // a tier by name, or a named tier with overrides ({ base: "high", gtao: false }) for films
+    setQuality(q) {
+      const base = typeof q === "string" ? q : q?.base || "high";
+      if (!TIERS[base]) return;
+      tierName = typeof q === "string" ? q : "custom";
+      tier = typeof q === "string" ? TIERS[q] : { ...TIERS[base], ...q };
       applyTier();
     },
     setMode: (m) => director.setMode(m),

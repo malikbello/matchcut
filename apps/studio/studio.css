@@ -226,6 +226,7 @@ body.render.aspect-9x16 .film-card .fc-sub { font-size: 26px; max-width: 22ch; }
 .cut-meter { height: 6px; border-radius: 3px; background: var(--ink-700); overflow: hidden; }
 .cut-meter span { display: block; height: 100%; width: 34%; border-radius: 3px; background: linear-gradient(90deg, var(--signal), var(--floodlight)); animation: meter 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
 @keyframes meter { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.cut-meter.known span { animation: none; transition: width 600ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .cut-result { display: grid; gap: 10px; }
 .cut-result video { width: 100%; max-height: 520px; border-radius: 10px; background: #000; border: 1px solid var(--ink-700); }
 .cut-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }

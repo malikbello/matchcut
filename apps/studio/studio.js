@@ -157,7 +157,7 @@ async function startShow() {
     const mod = await import("./dist/show3d.js");
     if (!mod.webglAvailable()) throw new Error("WebGL2 unavailable");
     state.show = await mod.createShow({
-      canvas: $("show"), feed: state.feed, assets: "assets/3d",
+      canvas: $("show"), feed: state.feed, assets: "assets/3d", adaptive: !RENDER,
       onQuality: (tier) => console.info(`show camera quality: ${tier}`),
     });
     state.show.setMode($("cam").value);
@@ -522,7 +522,7 @@ function stepAnimations(ms) {
   }
 }
 window.__render = {
-  async init({ match, lang, aspect }) {
+  async init({ match, lang, aspect, quality = null }) {
     document.body.classList.add("render", `aspect-${aspect}`);
     $("gate").hidden = true; $("studio").hidden = false;
     state.sound = false; state.playing = false;
@@ -532,7 +532,8 @@ window.__render = {
     await loadMatch(list.find((m) => m.match_id === match));
     setView("3d");
     while (!state.show) await new Promise((r) => setTimeout(r, 100));
-    return { end: state.end, goals: state.feed.goals, moments: state.moments.length };
+    if (quality) state.show.setQuality(quality);
+    return { end: state.end, goals: state.feed.goals, moments: state.moments.length, quality: state.show.quality };
   },
   packageDuration(goalT) {
     const goal = state.feed.goals.find((g) => g.t === goalT);
@@ -631,10 +632,16 @@ async function followCut() {
   if (st.status === "done") { remember(null); cutStage("done"); return; }
   if (st.status === "failed") { remember(null); cutStage("failed"); return; }
   const mins = Math.floor((Date.now() - cut.started) / 60000);
-  $("cut-state").textContent = st.status === "queued" ? "In the queue" : "Rendering your film";
+  const meter = $("cut-progress").querySelector(".cut-meter");
+  const share = st.chunks ? (st.rendered || 0) / st.chunks : null;
+  meter.classList.toggle("known", st.status === "rendering" && share !== null);
+  if (share !== null) meter.firstElementChild.style.width = `${Math.max(4, share * 100)}%`;
+  $("cut-state").textContent = { queued: "In the queue", rendering: "Rendering your film", assembling: "Mixing the sound" }[st.status] || "Working";
   $("cut-hint").textContent = st.status === "queued"
-    ? "A renderer is starting up."
-    : `Every frame drawn, voiced and mixed in the cloud${mins ? `, ${mins} min so far` : ""}. Keep watching the match meanwhile.`;
+    ? "Renderers are starting in the cloud."
+    : st.status === "assembling"
+      ? "All scenes drawn. Adding the crowd and the commentary."
+      : `${st.chunks ? `${st.rendered || 0} of ${st.chunks} scenes drawn in parallel` : "Every frame drawn in the cloud"}${mins ? `, ${mins} min so far` : ""}. Keep watching the match meanwhile.`;
   cut.timer = setTimeout(followCut, 4000);
 }
 async function makeCut(e) {

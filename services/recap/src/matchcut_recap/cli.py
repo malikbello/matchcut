@@ -18,9 +18,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-from matchcut_recap.edl import build_cut, frames
+from matchcut_recap.edl import Cut, build_cut, frames
 from matchcut_recap.mix import mix
-from matchcut_recap.render import Studio, mux
+from matchcut_recap.render import FILM_QUALITY, Studio, concat, mux
+
+WARMUP_S = 2  # seconds of uncaptured frames before a slice or still, so motion settles
 
 LANGUAGE_NAMES = {
     "en": "English",
@@ -76,7 +78,16 @@ def _durations(files: set[str], media_root: Path, ffprobe: str) -> dict[str, flo
     return out
 
 
-def cmd_make(a: argparse.Namespace) -> Path:
+def chunk_range(total: int, chunk: int, chunks: int) -> range:
+    """Frames of chunk `chunk` (0-based) when a film of `total` frames is split `chunks` ways."""
+    return range(total * chunk // chunks, total * (chunk + 1) // chunks)
+
+
+def make_part(a: argparse.Namespace) -> tuple[Cut, Path]:
+    """Plan the cut and render this machine's slice of it (the whole film when chunks is 1).
+
+    The plan is deterministic (same feed, cues, calls and Studio), so every render-job replica
+    computes the same frame list and renders only its own slice."""
     root = Path(a.data)
     feed = json.loads(gzip.decompress((root / "feeds" / f"{a.match}.json.gz").read_bytes()))
     cues = _cues(root / "insights" / f"{a.match}.jsonl", a.lang)
@@ -86,16 +97,13 @@ def cmd_make(a: argparse.Namespace) -> Path:
         if calls_path.is_file()
         else []
     )
-    media = root / "media"
     files = {c["audio"] for c in cues + calls if c.get("audio")}
-    durations = _durations(files, media, a.ffprobe)
+    durations = _durations(files, root / "media", a.ffprobe)
     focus = {"player": a.player} if a.player else {"side": a.side}
-    out_dir = Path(a.out)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    who = (a.player or a.side).lower().replace(" ", "-")
-    stem = out_dir / f"{a.match}-{who}-{a.lang}-{a.aspect}"
+    stem = _stem(a)
     code = os.environ.get("MATCHCUT_RENDER_CODE", "")
-    with Studio(a.base, code, a.match, a.lang, a.aspect, gpu_less=a.gpu_less) as studio:
+    quality = json.loads(a.quality) if (a.quality or "").startswith("{") else (a.quality or FILM_QUALITY)
+    with Studio(a.base, code, a.match, a.lang, a.aspect, gpu_less=a.gpu_less, quality=quality) as studio:
         packages = {g["t"]: studio.package_duration(g["t"]) for g in feed.get("goals", [])}
         cut = build_cut(
             feed,
@@ -118,24 +126,51 @@ def cmd_make(a: argparse.Namespace) -> Path:
             # animation blends and camera moves settle exactly as they do in the film.
             wanted = sorted({min(int(float(x) * a.fps), len(specs) - 1) for x in a.stills.split(",")})
             for w in wanted:
-                for i in range(max(0, w - 2 * a.fps), w):
+                for i in range(max(0, w - WARMUP_S * a.fps), w):
                     studio.step(specs[i], i, a.fps)
                 studio.still(specs[w], w, a.fps, stem.parent / f"{stem.name}-{w / a.fps:05.1f}s.png")
-            print(f"stills -> {out_dir}")
-            return out_dir
-        video = studio.render(
-            specs,
+            print(f"stills -> {stem.parent}")
+            return cut, stem.parent
+        span = chunk_range(len(specs), a.chunk, a.chunks)
+        warm = range(max(0, span.start - WARMUP_S * a.fps), span.start)
+        part = stem.parent / f"{stem.name}.part{a.chunk:02d}.mp4"
+        studio.render(
+            specs[span.start : span.stop],
             a.fps,
-            stem.with_suffix(".video.mp4"),
+            part,
             a.ffmpeg,
-            progress=lambda i, n, s: print(f"  frame {i}/{n}  {s:.0f} s", flush=True),
+            progress=lambda i, n, s: print(f"  frame {span.start + i}/{len(specs)}  {s:.0f} s", flush=True),
+            first=span.start,
+            warmup=[specs[i] for i in warm],
         )
-    audio = mix(cut, media, Path(a.crowd), stem.with_suffix(".audio.m4a"), a.ffmpeg)
+    return cut, part
+
+
+def assemble(a: argparse.Namespace, cut: Cut, parts: list[Path]) -> Path:
+    """Join the rendered slices, mix the sound once and mux the film."""
+    stem = _stem(a)
+    video = concat(parts, stem.with_suffix(".video.mp4"), a.ffmpeg)
+    audio = mix(cut, Path(a.data) / "media", Path(a.crowd), stem.with_suffix(".audio.m4a"), a.ffmpeg)
     final = mux(video, audio, stem.with_suffix(".mp4"), a.ffmpeg)
-    for tmp in (video, audio):
+    for tmp in (video, audio, *parts):
         tmp.unlink(missing_ok=True)
     print(f"film -> {final}")
     return final
+
+
+def _stem(a: argparse.Namespace) -> Path:
+    out_dir = Path(a.out)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    who = (a.player or a.side).lower().replace(" ", "-")
+    return out_dir / f"{a.match}-{who}-{a.lang}-{a.aspect}"
+
+
+def cmd_make(a: argparse.Namespace) -> Path:
+    """One machine: render every frame, then assemble (a chunk alone with --chunks > 1)."""
+    cut, part = make_part(a)
+    if a.stills or a.chunks > 1:
+        return part
+    return assemble(a, cut, [part])
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -161,8 +196,13 @@ def main(argv: list[str] | None = None) -> None:
         "--gpu-less", action="store_true", help="servers without a GPU: render WebGL on Mesa llvmpipe"
     )
     m.add_argument(
+        "--quality", help='a Studio tier (high) or JSON overrides, e.g. {"base": "high", "gtao": true}'
+    )
+    m.add_argument(
         "--stills", help="seconds of the film to save as PNGs instead of rendering it, e.g. 1.5,14,22"
     )
+    m.add_argument("--chunk", type=int, default=0, help="this machine's slice of the film (0-based)")
+    m.add_argument("--chunks", type=int, default=1, help="slices the film is split into across machines")
     args = p.parse_args(argv)
     cmd_make(args)
 
