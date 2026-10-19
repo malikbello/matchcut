@@ -113,6 +113,16 @@ def cmd_make(a: argparse.Namespace) -> Path:
         )
         print(f"cut: {len(cut.segments)} segments, {cut.duration:.1f} s, {len(cut.audio)} sounds")
         specs = frames(cut, a.fps)
+        if a.stills:
+            # QA and thumbnails: chosen moments as PNGs. Two seconds of frames run first, so
+            # animation blends and camera moves settle exactly as they do in the film.
+            wanted = sorted({min(int(float(x) * a.fps), len(specs) - 1) for x in a.stills.split(",")})
+            for w in wanted:
+                for i in range(max(0, w - 2 * a.fps), w):
+                    studio.step(specs[i], i, a.fps)
+                studio.still(specs[w], w, a.fps, stem.parent / f"{stem.name}-{w / a.fps:05.1f}s.png")
+            print(f"stills -> {out_dir}")
+            return out_dir
         video = studio.render(
             specs,
             a.fps,
@@ -149,6 +159,9 @@ def main(argv: list[str] | None = None) -> None:
     m.add_argument("--ffprobe", default=shutil.which("ffprobe") or "ffprobe")
     m.add_argument(
         "--gpu-less", action="store_true", help="servers without a GPU: render WebGL on Mesa llvmpipe"
+    )
+    m.add_argument(
+        "--stills", help="seconds of the film to save as PNGs instead of rendering it, e.g. 1.5,14,22"
     )
     args = p.parse_args(argv)
     cmd_make(args)

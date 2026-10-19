@@ -20,8 +20,8 @@ param accessCodeSha256 string
 @description('Key that signs Studio session cookies')
 @secure()
 param sessionSecret string
-@description('GitHub repository whose production environment may release (OIDC, no secrets)')
-param githubRepo string = 'malikbello/matchcut'
+@description('GitHub repository whose production environment may release (OIDC, no secrets), as GitHub names it in the token subject: owner@id/repo@id, so a re-created repository with the same name is not trusted')
+param githubRepo string = 'malikbello@139644523/matchcut@1423646206'
 @description('People and CI identities that publish the showcase bundle (blob data access)')
 param deployerPrincipalIds array = []
 @description('Deploy the apps (false on the first run, before images exist)')

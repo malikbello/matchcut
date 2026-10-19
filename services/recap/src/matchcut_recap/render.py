@@ -49,6 +49,18 @@ class Studio:
         if self._pw:
             self._pw.stop()
 
+    def step(self, spec: dict[str, Any], index: int, fps: int) -> None:
+        """Advance the page to frame `index` without capturing it."""
+        assert self.page
+        self.page.evaluate("([s, i, f]) => window.__render.frame(s, i, f)", [spec, index, fps])
+
+    def still(self, spec: dict[str, Any], index: int, fps: int, out: Path) -> Path:
+        """One frame of the film as a PNG (QA, thumbnails)."""
+        assert self.page
+        self.step(spec, index, fps)
+        self.page.screenshot(path=str(out), type="png")
+        return out
+
     def package_duration(self, goal_t: int) -> float:
         assert self.page
         return float(self.page.evaluate("(t) => window.__render.packageDuration(t)", goal_t))
@@ -79,10 +91,18 @@ class Studio:
                 "-",
                 "-c:v",
                 "libx264",
+                # quality-led but capped for sharing: phones and social apps play it without
+                # re-encoding, and an 80 s film stays near 40 MB
                 "-preset",
-                "medium",
+                "slow",
                 "-crf",
-                "19",
+                "20",
+                "-maxrate",
+                "4500k",
+                "-bufsize",
+                "9000k",
+                "-profile:v",
+                "high",
                 "-pix_fmt",
                 "yuv420p",
                 "-movflags",

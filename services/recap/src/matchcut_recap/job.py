@@ -89,6 +89,7 @@ def main() -> None:
             ffmpeg="ffmpeg",
             ffprobe="ffprobe",
             gpu_less=True,
+            stills=None,
         )
         film = cmd_make(args)
         with film.open("rb") as f:

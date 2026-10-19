@@ -35,6 +35,33 @@ REPLAY_ANALYSIS_AT_S = 8.4  # into the package: the first replay angle has start
 CHANCE_KINDS = {"big_chance", "great_save"}
 
 
+# Card wording in each language a cut is voiced in. Nigerian English and Pidgin use the
+# English cards (how Nigerian broadcasts caption them).
+CARD_WORDS: dict[str, dict[str, str]] = {
+    "en": {
+        "your_cut": "Your cut",
+        "full_time": "Full time",
+        "made": "Made with Matchcut  ·  every line verified",
+    },
+    "fr": {
+        "your_cut": "Votre résumé",
+        "full_time": "Fin du match",
+        "made": "Réalisé avec Matchcut  ·  chaque phrase vérifiée",
+    },
+    "es": {
+        "your_cut": "Tu resumen",
+        "full_time": "Final del partido",
+        "made": "Hecho con Matchcut  ·  cada frase verificada",
+    },
+    "pt": {
+        "your_cut": "O seu resumo",
+        "full_time": "Fim de jogo",
+        "made": "Feito com Matchcut  ·  cada frase verificada",
+    },
+    "ar": {"your_cut": "ملخّصك", "full_time": "نهاية المباراة", "made": "صُنع مع Matchcut  ·  كل جملة موثّقة"},
+}
+
+
 @dataclass
 class Segment:
     kind: str  # card | live | package
@@ -171,6 +198,10 @@ def build_cut(
     picks = _fit(pick_moments(feed, cues, focus), package_durations)
     focus_name = focus.get("player") or feed["teams"][focus.get("side", "home")]["name"]
     title = f"{home['name']} v {away['name']}"
+    words = CARD_WORDS.get(language, CARD_WORDS["en"])
+    # the title names the fan's club or player; the line under it never repeats it
+    side = focus.get("side")
+    versus = f"v {feed['teams']['away' if side == 'home' else 'home']['name']}" if side else title
     cut = Cut(feed["match_id"], language, aspect, focus_name, title)
     first_t = picks[0]["t"] - RUN_UP_S * 1000 if picks else 0
     cut.segments.append(
@@ -178,8 +209,8 @@ def build_cut(
             "card",
             TITLE_S,
             t0=max(0, first_t),
-            title=title,
-            sub=f"{focus_name}: your cut  ·  {language_name or language}",
+            title=focus_name,
+            sub=f"{versus}  ·  {words['your_cut']}  ·  {language_name or language}",
         )
     )
     windows: list[tuple[float, float, float, float]] = []  # film start, film end, match from, match to
@@ -221,8 +252,8 @@ def build_cut(
             "card",
             END_S,
             t0=last_t,
-            title=f"Full time  {score}",
-            sub="Made with Matchcut  ·  every line verified",
+            title=f"{words['full_time']}  {score}",
+            sub=words["made"],
         )
     )
 

@@ -65,10 +65,38 @@ button.primary:hover { transform: translateY(-1px); }
 body.render .bar, body.render .rail, body.render .transport, body.render .evidence, body.render #skip-replay, body.render .show-loading { display: none !important; }
 body.render .studio { display: block; padding: 0; max-width: none; }
 body.render .screen { position: fixed; inset: 0; border-radius: 0; border: 0; aspect-ratio: auto; box-shadow: none; }
-body.render.aspect-9x16 .cue { left: 4%; right: 4%; bottom: 7%; }
-body.render.aspect-9x16 .goal-strap { bottom: 14%; transform: translateX(-50%) scale(0.9); }
+body.render #cue-evidence, body.render #cue-pending { display: none; }
+body.render.on-card .scorebug, body.render.on-card .player-tag, body.render.on-card .cue, body.render.on-card .replay-bug { display: none !important; }
+/* vertical films are watched on phones at about 390 points wide: everything reads at arm's length,
+   the GOAL strap owns the upper third and the caption the lower third, so they never collide */
+body.render.aspect-9x16 .scorebug { top: 3.5%; left: 4%; transform: scale(1.3); transform-origin: top left; }
+body.render.aspect-9x16 .replay-bug { top: 3.5%; right: 4%; transform: scale(1.3); transform-origin: top right; }
+body.render.aspect-9x16 .goal-strap { top: 15%; bottom: auto; height: 84px; }
+body.render.aspect-9x16 .goal-strap .g { font-size: 58px; padding: 0 24px; }
+body.render.aspect-9x16 .goal-strap .who { font-size: 46px; padding: 0 20px; }
+body.render.aspect-9x16 .goal-strap .min { font-size: 34px; padding: 0 16px; }
+body.render.aspect-9x16 .cue { left: 4%; right: 4%; bottom: 6%; max-width: none; grid-template-columns: 1fr; border-radius: 18px; }
+body.render.aspect-9x16 .hero { grid-auto-flow: column; justify-content: start; align-items: baseline; gap: 12px; padding: 14px 24px; min-width: 0; }
+body.render.aspect-9x16 .hero-value { font-size: 64px; }
+body.render.aspect-9x16 .hero-label { font-size: 16px; }
+body.render.aspect-9x16 .cue-body { padding: 18px 24px 20px; }
+body.render.aspect-9x16 .cue-kind { font-size: 16px; }
+body.render.aspect-9x16 .cue-kind .icon { width: 20px; height: 20px; }
+body.render.aspect-9x16 .cue-text { font-size: 36px; line-height: 1.12; margin: 10px 0 12px; }
+body.render.aspect-9x16 .cue-text:lang(ar) { font-size: 32px; }
+body.render.aspect-9x16 .stamp { font-size: 16px; }
+body.render.aspect-9x16 .player-tag .num { font-size: 26px; min-width: 40px; }
+body.render.aspect-9x16 .player-tag .name { font-size: 25px; padding: 7px 12px 6px; }
+body.render.aspect-9x16 .film-card .fc-mark { font-size: 92px; }
+body.render.aspect-9x16 .film-card .fc-title { font-size: 76px; max-width: 9ch; }
+body.render.aspect-9x16 .film-card .fc-sub { font-size: 26px; max-width: 22ch; }
 /* film cards: the title at the start of a cut and the result at the end */
 .film-card { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; background: radial-gradient(120% 90% at 50% 40%, rgba(12, 16, 22, 0.78), rgba(7, 9, 13, 0.96)); text-align: center; padding: 6%; }
+/* the clubs' colours cut across the card, the way the brand's slash cuts the wordmark */
+.film-card::before { content: ""; position: absolute; inset: -20%; background: linear-gradient(112deg, transparent 0 46%, var(--home) 46% 50.5%, transparent 50.5% 52%, var(--away) 52% 56.5%, transparent 56.5%); opacity: 0.28; animation: fcSweep 900ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.film-card::after { content: ""; position: absolute; left: 50%; bottom: 0; width: 140px; height: 6px; transform: translateX(-50%); background: var(--signal); }
+.film-card > * { position: relative; }
+@keyframes fcSweep { from { transform: translateX(-30%); opacity: 0; } to { transform: none; opacity: 0.28; } }
 .film-card .fc-mark { font: 900 clamp(34px, 6vw, 84px)/1 var(--display); letter-spacing: 0.04em; color: var(--chalk); }
 .film-card .fc-mark span { color: var(--signal); display: inline-block; transform: skewX(-14deg); }
 .film-card .fc-title { font: 900 clamp(30px, 5vw, 72px)/1.05 var(--display); text-transform: uppercase; color: var(--chalk); max-width: 18ch; animation: cutIn 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
