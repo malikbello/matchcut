@@ -17,11 +17,11 @@ function turfTexture(renderer) {
   const c = cv.getContext("2d");
   const X = (x) => (x + APRON) * PX;
   const Y = (y) => (y + APRON) * PX;
-  c.fillStyle = "#1d5c2e";
+  c.fillStyle = "#1c5a2c";
   c.fillRect(0, 0, w, h);
   const stripes = 18;
   for (let i = 0; i < stripes; i++) {
-    c.fillStyle = i % 2 ? "#236b35" : "#1f6231";
+    c.fillStyle = i % 2 ? "#2a773b" : "#1c5a2c"; // mowing stripes read strongly on broadcast
     c.fillRect(X(-APRON + (i * (L + 2 * APRON)) / stripes), 0, ((L + 2 * APRON) / stripes) * PX + 1, h);
   }
   // fine grain so the grass never reads as flat paint at broadcast distance
@@ -33,6 +33,22 @@ function turfTexture(renderer) {
     img.data[i + 2] += n;
   }
   c.putImageData(img, 0, 0);
+  // wear, as a pitch looks deep into a season: goalmouths, penalty spots and the centre spot
+  const wear = (x, y, rx, ry, a) => {
+    const g = c.createRadialGradient(X(x), Y(y), 0, X(x), Y(y), rx * PX);
+    g.addColorStop(0, `rgba(122, 104, 64, ${a})`);
+    g.addColorStop(1, "rgba(122, 104, 64, 0)");
+    c.save();
+    c.translate(X(x), Y(y));
+    c.scale(1, ry / rx);
+    c.translate(-X(x), -Y(y));
+    c.fillStyle = g;
+    c.fillRect(X(x - rx), Y(y - rx), 2 * rx * PX, 2 * rx * PX);
+    c.restore();
+  };
+  for (const gx of [1.5, L - 1.5]) wear(gx, W / 2, 5, 3.5, 0.42);
+  for (const px of [11, L - 11]) wear(px, W / 2, 1.6, 1.6, 0.35);
+  wear(L / 2, W / 2, 2.2, 2.2, 0.25);
   c.strokeStyle = "rgba(245,247,242,0.92)";
   c.fillStyle = "rgba(245,247,242,0.92)";
   c.lineWidth = 0.12 * PX;
@@ -113,7 +129,11 @@ export function buildPitch(renderer) {
   const group = new THREE.Group();
   const turf = new THREE.Mesh(
     new THREE.PlaneGeometry(L + 2 * APRON, W + 2 * APRON),
-    new THREE.MeshStandardMaterial({ map: turfTexture(renderer), roughness: 0.92, metalness: 0 }),
+    // grass is velvet-like: blades catch the light at grazing angles, so it gets a sheen
+    new THREE.MeshPhysicalMaterial({
+      map: turfTexture(renderer), roughness: 0.9, metalness: 0,
+      sheen: 0.22, sheenRoughness: 0.6, sheenColor: new THREE.Color(0x5f8f4a),
+    }),
   );
   turf.rotation.x = -Math.PI / 2;
   turf.receiveShadow = true;
