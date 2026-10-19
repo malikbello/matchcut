@@ -11,7 +11,8 @@ serves the pre-compressed file as is. Layout:
      "keepers": [slot...], "events": [[t, type, slot, body_part, outcome, x, y, end_x, end_y, to_slot]...],
      "cuts": [t...]}
 
-An empty slot (a player sent off) is written as -1, -1.
+An empty slot (a player sent off) is written as EMPTY, EMPTY (-9999): real positions can be negative,
+since players step behind the goal line or off the touchline.
 """
 
 from __future__ import annotations
@@ -28,6 +29,7 @@ from matchcut_sim.engine import MatchResult
 from matchcut_sim.league import League, match_kits
 
 FEED_HZ = 10  # the engine's native rate: the 3D players need every step
+EMPTY = -9999  # an empty slot; never a real position (decimetres)
 
 
 def build_feed(m: MatchResult, league: League, hz: int = FEED_HZ) -> dict[str, Any]:
@@ -71,7 +73,7 @@ def build_feed(m: MatchResult, league: League, hz: int = FEED_HZ) -> dict[str, A
         row: list[int] = []
         for slot in range(len(m.team_of_slot)):
             if int(m.roster[i, slot]) < 0:
-                row += [-1, -1]
+                row += [EMPTY, EMPTY]
             else:
                 row += [round(float(m.pos[i, slot, 0]) * 10), round(float(m.pos[i, slot, 1]) * 10)]
         frames.append(row)

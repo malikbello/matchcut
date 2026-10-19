@@ -48,3 +48,18 @@ def test_one_keeper_per_side_and_restarts_are_marked(match_and_feed):
     # the second half starts with everyone repositioned: the scene must cut, not slide
     second = next(t for t, p in zip(feed["t"], feed["period"], strict=True) if p == 2)
     assert any(abs(c - second) <= 1000 for c in feed["cuts"])
+
+
+def test_empty_slots_are_marked_and_real_positions_never_look_empty(match_and_feed):
+    m, _, feed = match_and_feed
+    from matchcut_sim.feed import EMPTY  # noqa: PLC0415
+
+    for i, row in enumerate(feed["p"]):
+        for slot in range(len(feed["slots"])):
+            on_pitch = int(m.roster[i, slot]) >= 0
+            x, y = row[2 * slot], row[2 * slot + 1]
+            if on_pitch:
+                assert x > EMPTY
+                assert y > EMPTY  # behind the goal line is negative, and still a real position
+            else:
+                assert (x, y) == (EMPTY, EMPTY)

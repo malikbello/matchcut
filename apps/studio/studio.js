@@ -144,12 +144,28 @@ async function startShow() {
     $("show-loading").hidden = true;
   }
 }
+// a broadcast ID tag over a player's head (3D view), or hidden when slot < 0
+function placeTag(slot, who) {
+  const pos = slot >= 0 && who ? state.show.screenOf(slot) : null;
+  const tag = $("tag");
+  if (!pos) { tag.hidden = true; tag.dataset.slot = ""; return; }
+  if (tag.dataset.slot !== String(slot)) {
+    tag.dataset.slot = String(slot);
+    $("tag-num").textContent = String(who.num);
+    $("tag-name").textContent = who.name;
+    $("tag-bar").style.background = state.feed.slots[slot] === state.feed.teams.home.id ? "var(--home)" : "var(--away)";
+  }
+  tag.hidden = false;
+  tag.style.left = `${(pos.x * 100).toFixed(2)}%`;
+  tag.style.top = `${(pos.y * 100).toFixed(2)}%`;
+}
 function endPackage() {
   if (!state.pkg) return;
   state.t = Math.max(state.t, state.pkg.goal.t + 1500);
   state.pkg = null;
   state.show?.endPackage();
   $("wipe").hidden = true; $("replay-bug").hidden = true; $("skip-replay").hidden = true;
+  $("goal-strap").hidden = true; $("tag").hidden = true;
 }
 function setView(view) {
   state.view = view;
@@ -157,6 +173,7 @@ function setView(view) {
   $("view-3d").setAttribute("aria-pressed", String(is3d));
   $("view-2d").setAttribute("aria-pressed", String(!is3d));
   $("show").hidden = !is3d; $("pitch").hidden = is3d; $("cam-wrap").hidden = !is3d;
+  if (!is3d) $("tag").hidden = true;
   if (is3d && !state.show && state.feed) startShow();
   if (!is3d) resize();
 }
@@ -367,12 +384,26 @@ function draw() {
       $("replay-bug").hidden = !res.label;
       $("replay-bug").classList.toggle("slow", Boolean(res.slowMotion));
       $("skip-replay").hidden = false;
+      // the scorer's tag and the goal strap ride the celebration
+      const celebrating = !res.label && !res.wipe && state.pkg.pt < 7;
+      const scorer = state.pkg.plan.scorer;
+      const who = scorer >= 0 ? state.feed.players[rosterAt(state.pkg.goal.t)[String(scorer)]] : null;
+      placeTag(celebrating && who ? scorer : -1, who);
+      $("goal-strap").hidden = !(celebrating && who && state.pkg.pt > 0.6);
+      if (who) {
+        $("goal-who").textContent = who.name;
+        $("goal-min").textContent = `${Math.floor(state.pkg.goal.t / 60000) + 1}'`;
+      }
       if (res.done) endPackage();
       return;
     }
     const excitement = state.shown && now() - state.shownAt < 6000 ? EXCITEMENT[state.shown.kind] : null;
     const out = state.show.render(state.t, { excitement });
     state.crowd?.update(out?.excitement ?? 0);
+    // the player a moment card is about gets a broadcast ID tag while the card is up
+    const named = state.shown && now() - state.shownAt < CUE_SECONDS * 1000 && fact(state.shown, "player involved");
+    const slot = named ? state.show.slotOf(named.value) : -1;
+    placeTag(slot, slot >= 0 ? state.feed.players[rosterAt(state.t)[String(slot)]] : null);
     return;
   }
   state.crowd?.update(state.shown && now() - state.shownAt < 6000 ? EXCITEMENT[state.shown.kind] ?? dangerAt(state.t) : dangerAt(state.t));
@@ -392,7 +423,7 @@ function draw() {
   const spotlight = state.shown && fact(state.shown, "player involved");
   const players = [];
   for (let slot = 0; slot < state.feed.slots.length; slot++) {
-    if (pa[2 * slot] < 0 || pb[2 * slot] < 0) continue;
+    if (pa[2 * slot] === -9999 || pb[2 * slot] === -9999) continue; // empty slot (negative positions are real)
     const x = (pa[2 * slot] + (pb[2 * slot] - pa[2 * slot]) * u) / 10;
     const y = (pa[2 * slot + 1] + (pb[2 * slot + 1] - pa[2 * slot + 1]) * u) / 10;
     const side = state.feed.slots[slot] === state.feed.teams.home.id ? "home" : "away";

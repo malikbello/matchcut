@@ -20,6 +20,7 @@ import { FrameGovernor, ORDER, TIERS, webglAvailable } from "./quality.js";
 import { animateCrowd, buildSky, buildStadium } from "./stadium.js";
 
 export { webglAvailable };
+const EMPTY = -9999; // the feed's empty-slot marker (see services/sim feed.py)
 export { Crowd } from "./crowd.js";
 
 function frameAt(feed, t) {
@@ -281,7 +282,7 @@ export async function createShow({
     const pb = feed.p[b];
     const xa = pa[2 * slot];
     const xb = pb[2 * slot];
-    if (xa < 0 || xb < 0) return null;
+    if (xa === EMPTY || xb === EMPTY) return null; // a sent-off player; negative positions are real
     const ya = pa[2 * slot + 1];
     const yb = pb[2 * slot + 1];
     const jump = Math.hypot(xb - xa, yb - ya) / 10 > 3; // a teleport in the data is never animated
@@ -291,10 +292,10 @@ export async function createShow({
     }
     const p0 = feed.p[Math.max(0, a - 1)];
     const p3 = feed.p[Math.min(feed.p.length - 1, b + 1)];
-    const x0 = p0[2 * slot] >= 0 ? p0[2 * slot] : xa;
-    const y0 = p0[2 * slot + 1] >= 0 ? p0[2 * slot + 1] : ya;
-    const x3 = p3[2 * slot] >= 0 ? p3[2 * slot] : xb;
-    const y3 = p3[2 * slot + 1] >= 0 ? p3[2 * slot + 1] : yb;
+    const x0 = p0[2 * slot] !== EMPTY ? p0[2 * slot] : xa;
+    const y0 = p0[2 * slot + 1] !== EMPTY ? p0[2 * slot + 1] : ya;
+    const x3 = p3[2 * slot] !== EMPTY ? p3[2 * slot] : xb;
+    const y3 = p3[2 * slot + 1] !== EMPTY ? p3[2 * slot + 1] : yb;
     const [x, z] = toWorld(spline(x0, xa, xb, x3, u) / 10, spline(y0, ya, yb, y3, u) / 10);
     return { x, z, vx: splineVel(x0, xa, xb, x3, u, span) / 10, vz: splineVel(y0, ya, yb, y3, u, span) / 10, jump };
   }
@@ -468,6 +469,24 @@ export async function createShow({
       applyTier();
     },
     setMode: (m) => director.setMode(m),
+    // where a player's head is on screen (0..1 from the top left), for broadcast ID tags
+    screenOf(slot) {
+      const pl = players[slot];
+      if (!pl || !pl.root.visible) return null;
+      const p = pl.root.position.clone();
+      p.y += 2.15;
+      p.project(camera);
+      if (p.z > 1 || Math.abs(p.x) > 1.1 || Math.abs(p.y) > 1.1) return null;
+      return { x: (p.x + 1) / 2, y: (1 - p.y) / 2 };
+    },
+    // the slot a named player occupies at the current time (names are unique within a match)
+    slotOf(name) {
+      for (let s = 0; s < players.length; s++) {
+        const who = identityAt(s, lastT ?? 0);
+        if (who && who.name === name) return s;
+      }
+      return -1;
+    },
     debug: { scene, renderer, bloom, key, rim, camera, director },
     dispose() {
       observer.disconnect();
