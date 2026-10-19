@@ -1,0 +1,23 @@
+# keep build contexts small and free of secrets; the Studio's private assets are included on purpose
+.git
+.venv
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+**/node_modules
+apps/studio/dist
+.env
+.env.*
+.azure
+.azure-config
+assets-cc0
+assets-private
+data
+renders
+research
+reports
+out/cuts
+*.zip
+*.pem
+*.key
+*.tar.gz

@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 18 Oct 2026 · **Phase:** D3.2 (voices and languages) in review
+**Updated:** Mon 19 Oct 2026 · **Phase:** D5 (fan cuts) and D6 (Azure) in progress on `d4/show-camera`, draft PR #8; D3.2 merged (#7)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -15,8 +15,33 @@
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
-## Resume here (handoff, 18 Oct)
-- D2 merged (#3). D3 PR open from `d3/insights`; merge on green CI.
+## Resume here (handoff, 19 Oct, midday)
+- **D5 Export my cut, built:** recap Editor (EDL from the feed, cues and calls), headless renderer on a virtual clock (Playwright, Studio `?render=1`), ffmpeg mix (crowd beds, chant, roars, voiced calls with sidechain ducking, -16 LUFS), CLI `matchcut-recap make`. First film (Kestrel Bay, English, 9:16, about 81 s) rendering locally in `out/cuts/`.
+- **Fan cut flow:** `POST /api/cuts` (club or player, language, format; validated, 6 per hour), `GET /api/cuts/{id}`, `GET /media/cuts/{id}.mp4` (byte ranges); Studio "Your cut" panel (watch, download, share). Local back end renders in a background process; Azure back end uses the `cuts` queue and blob container.
+- **D6 Azure:** `infra/main.bicep` (Log Analytics, App Insights, ACR Basic, user-assigned identity with least-privilege roles, Storage with shared keys off, `cuts` queue and blob, `showcase` blob, Container Apps environment, Studio app scaled to zero, recap Container Apps Job with a KEDA queue trigger on managed identity). `deploy/deploy.sh` (infra, showcase bundle, `az acr build`, apps, smoke test). `.github/workflows/deploy.yml` (OIDC, gated by the `MATCHCUT_DEPLOY_ENABLED` variable). Base infra deployed to `rg-matchcut-dev` on 19 Oct. Production access code and session key live outside the repo in `inside-the-game/.secrets/matchcut-prod.env`.
+- Next: verify the film, regenerate the feed (EMPTY sentinel), build images in ACR, deploy the apps, render a cut on Azure, set up the GitHub OIDC identity.
+
+## Earlier handoff (19 Oct, morning)
+- Branch `d4/show-camera` (draft PR #8). Local preview: `matchcut-api` on port 8765 (access code `studio-preview`); `npm run assets && npm run build` in `apps/studio` first.
+- **Malik's verdict, 19 Oct: the visuals are far below the standard required.** Next is a full visual overhaul (art direction, characters, stadium, crowd, lighting, grading, broadcast graphics), not more features.
+- Engine change pending its realism check: interceptions slow the ball when the interceptor cannot reach it in time (calibrated version), and after a goal the ball rests in the net for 35 s before kick-off positions (the celebration window). Commit only when the 12-match scorecard is 14/14 again.
+- After any engine change: regenerate the showcase match (feed, insights, calls, voices); the cues in `out/` were made before it.
+- Yoruba, Hausa and Igbo voices are pending for production (see ADR-0012). Captions stay.
+- At the end of the build, redraw the architecture diagrams to match what was actually used (Kaggle for voice research, Blender asset pipeline, esbuild Studio bundle, crowd audio, calls route).
+
+## Done in D4 so far (18 to 19 Oct)
+- **3D show camera:** Three.js bundled with esbuild (strict CSP kept, plus `wasm-unsafe-eval` for the mesh decoder), floodlit FIFA-size pitch, four-stand stadium, LED boards, reacting crowd, quality tiers with automatic step-down, 2D fallback.
+- **Feed v2:** 10 Hz positions, every on-ball event mapped to its player, keeper slots, restart cuts (tests).
+- **Animation:** Blender pipeline bakes the Mixamo soccer pack (64 clips, measured speed, direction and contact time; private, never committed); eight-way locomotion blend space with forward gears and a synced phase; players watch the ball and backpedal or side-step; actions aligned to the event's contact frame; keeper kits; spline-smoothed tracking that snaps at restarts.
+- **Broadcast:** cameras on the correct touchline (the view had been mirrored), close camera, hard cuts; goal package (celebration, branded wipe, two replay angles with slow motion, REPLAY bug, back to live).
+- **Sound:** crowd mix from CC0 stadium recordings (beds, stadium song swelling with danger, five goal roars, brightening filter, ducking under commentary); play-by-play calls in seven languages, voiced with emotion; English Harry and French Marc on MAI-Voice-2.1.
+- **Language:** chance quality said as fans say it ("9 times in 10"), never "xG", checked by the Verifier.
+- **Audits (scripts in the scratch area):** feed realism (speeds, turns, backwards running) and event consistency (actor to event distance per event type) found the missing events and the interception and goal-reset flaws.
+- **Voice research:** YarnGPT2 (too fast), Sunbird Orpheus-3B and Chatterbox auditions run on Kaggle free GPUs; Malik: not good enough yet.
+
+- D3.2 merged (#7, 46ceb23). Work continues on branch `d4/show-camera`.
+- Voices chosen 18 Oct: English Harry and French Marc (MAI-Voice-2.1, with mood). Yoruba, Hausa and Igbo voices deferred to a later release after the YarnGPT2 trial (too fast to follow); they stay captions-only (ADR-0012).
+- Open: native review of Yoruba (Malik), Hausa, Igbo, Pidgin and Arabic captions; the Localiser leaves football terms such as "press" in English, so it needs a per-language glossary.
 - Next: D4 (3D show camera with quality tiers + vision lane). First steps: Poly Haven CC0 textures; Blender retarget pipeline (Mixamo private, Quaternius CC0, CMU) onto one rig; Three.js scene.
 - Assets (git-ignored, local only): Mixamo in `assets-private/mixamo/`; Quaternius UAL 1+2 and CMU soccer mocap in `assets-cc0/`. Blender installed.
 
@@ -59,6 +84,10 @@
 ## Decisions log
 | Date | Decision |
 |---|---|
+| 19 Oct | Visuals judged far below standard by Malik: full visual overhaul before new features |
+| 19 Oct | Yoruba, Hausa and Igbo voices pending for production; language system stays registry-driven (ADR-0012) |
+| 19 Oct | Kaggle free GPUs allowed for research and fine-tuning; serving stays on Azure |
+| 19 Oct | Architecture diagrams to be redrawn at the end to match what was built |
 | 17 Oct | Matchcut approved; solo build; $0 spend; repo private until submission day |
 | 17 Oct | Auto-eventing from video in scope; AI narration for the demo film |
 | 18 Oct | Show camera animation sources: Mixamo (football actions, raw files kept private, baked into the app, never in the public repo), CMU motion capture, Quaternius CC0; public repo falls back to CMU + Quaternius. Automatic Low/Medium/High quality with 2D fallback; High is the default and the demo standard |

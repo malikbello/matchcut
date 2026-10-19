@@ -2,7 +2,7 @@ import httpx
 from matchcut_contracts import Cue, CueStatus, Fact, MomentKind
 from matchcut_insights.languages import LANGUAGES, canonical
 from matchcut_insights.verify import numbers_in, verify_translation
-from matchcut_insights.voice import AzureSpeech, ssml, voice_cues
+from matchcut_insights.voice import AzureSpeech, ssml, voice_cues, voice_key
 
 NAMES = {"Quinouani", "Kestrel Bay FC"}
 
@@ -52,6 +52,20 @@ def test_ssml_reads_scores_and_abbreviations_like_a_broadcaster():
     assert '<sub alias="P P D A">PPDA</sub>' in s
     assert "&amp;" in s  # text is escaped
     assert '<sub alias="2 a 1">2-1</sub>' in ssml("2-1", "es", "es-ES-AlvaroNeural")
+    assert '<prosody rate="+6%">' in s  # classic voice: brisk pace
+
+
+def test_expressive_voices_speak_with_the_moments_mood():
+    assert voice_key("en", "goal") == "azure:en-GB-Harry:MAI-Voice-2.1#joyful"
+    assert voice_key("en", "big_chance") == "azure:en-GB-Harry:MAI-Voice-2.1#surprised"
+    assert voice_key("en", "press_surge") == "azure:en-GB-Harry:MAI-Voice-2.1"  # analysis: calm
+    assert voice_key("fr", "goal") == "azure:fr-FR-Marc:MAI-Voice-2.1#shouting"
+    assert voice_key("en-NG", "goal") == "azure:en-NG-AbeoNeural"  # no styles: unchanged
+    assert voice_key("yo", "goal") is None
+    s = ssml("Quinouani scores: 1-0.", "en", "en-GB-Harry:MAI-Voice-2.1", "joyful")
+    assert 'xml:lang="en-GB"' in s
+    assert '<mstts:express-as style="joyful">' in s
+    assert "prosody" not in s  # expressive voices set their own pace
 
 
 def test_azure_speech_is_keyless_and_skips_caption_only_languages(tmp_path):
@@ -83,3 +97,8 @@ def test_azure_speech_is_keyless_and_skips_caption_only_languages(tmp_path):
     fresh = [_cue("en-NG")]
     assert voice_cues(fresh, speech, tmp_path) == 1
     assert not seen
+    # a different voice for the same cue re-renders it
+    manifest = tmp_path / "audio" / "kes-wcr-7" / "voices.json"
+    manifest.write_text('{"CU-00002-en-NG": "azure:old-voice"}', encoding="utf-8")
+    assert voice_cues([_cue("en-NG")], speech, tmp_path) == 1
+    assert seen["url"].endswith("/tts/cognitiveservices/v1")

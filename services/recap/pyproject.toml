@@ -1,0 +1,25 @@
+[project]
+name = "matchcut-recap"
+version = "0.1.0"
+description = "Every fan's cut: the Editor that plans a personal highlight film, and the renderer and mixer that make it."
+requires-python = ">=3.12"
+dependencies = [
+    "matchcut-contracts",
+    "playwright>=1.48",
+    "httpx>=0.28",
+    "azure-identity>=1.26",
+    "azure-storage-blob>=12.24",
+    "azure-storage-queue>=12.12",
+    "matchcut-api",
+]
+
+[project.scripts]
+matchcut-recap = "matchcut_recap.cli:main"
+matchcut-recap-job = "matchcut_recap.job:main"
+
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/matchcut_recap"]

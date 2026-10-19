@@ -1,0 +1,22 @@
+{
+ "yo": {
+  "call": "Gọ́ọ̀lù! Quinouani! Ìparí tó ya lórí! Kestrel Bay ti ń ṣáájú!",
+  "line": "Quinouani ṣe gọ́ọ̀lù ọ̀kan fún Kestrel Bay FC ní ìsẹ́jú àádọ́ta àti mẹ́ta, àsìkò tí ó máa ń di gọ́ọ̀lù nígbà mẹ́sàn-án nínú mẹ́wàá.",
+  "build": "Kestrel Bay ń lọ síwájú, Quinouani ti fọ́ taara sí gọ́ọ̀lù..."
+ },
+ "ha": {
+  "call": "GOL! Quinouani! Kai kyakkyawar kammalawa! Kestrel Bay na gaba!",
+  "line": "Quinouani na Kestrel Bay FC ya zura, ya sa Kestrel Bay ɗaya zuwa sifili a minti na hamsin da uku. Dama ce da ake cin sau tara cikin goma.",
+  "build": "Kestrel Bay sun tashi da hari, Quinouani ya fita kai tsaye kan raga..."
+ },
+ "ig": {
+  "call": "Gọl! Quinouani! Nke a mara mma! Kestrel Bay nọ n’ihu!",
+  "line": "Quinouani tọrọ gọl, Kestrel Bay dị otu nula na nkeji iri ise na atọ, ohere a bụ nke ị ga-etọ gọl itoolu n’ime iri.",
+  "build": "Kestrel Bay kụrụ ọsọ n’ihu, Quinouani pụtara n’ihu gọl..."
+ },
+ "en": {
+  "call": "Goal! Quinouani! What a finish! Kestrel Bay lead!",
+  "line": "Kestrel Bay FC's Quinouani makes it one nil in the fifty-third minute, a chance you would score nine times in ten.",
+  "build": "Kestrel Bay break forward, Quinouani is through on goal..."
+ }
+}

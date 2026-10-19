@@ -58,6 +58,52 @@ button.primary:hover { transform: translateY(-1px); }
 .stage { display: grid; gap: 12px; align-content: start; min-width: 0; }
 .screen { position: relative; aspect-ratio: 16 / 9; border-radius: var(--r-panel); overflow: hidden; background: var(--turf-900); border: 1px solid var(--ink-700); box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.8); }
 .screen canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.screen canvas[hidden] { display: none; }
+.show-loading { position: absolute; inset: auto auto 18px 18px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--r-chip); background: rgba(7, 9, 13, 0.8); color: var(--mist); font: 600 12px var(--ui); letter-spacing: 0.04em; }
+.show-loading .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--floodlight); animation: pulse 1.2s ease-in-out infinite; }
+/* render mode: the screen alone, full frame, for exported films (16:9 or 9:16) */
+body.render .bar, body.render .rail, body.render .transport, body.render .evidence, body.render #skip-replay, body.render .show-loading { display: none !important; }
+body.render .studio { display: block; padding: 0; max-width: none; }
+body.render .screen { position: fixed; inset: 0; border-radius: 0; border: 0; aspect-ratio: auto; box-shadow: none; }
+body.render.aspect-9x16 .cue { left: 4%; right: 4%; bottom: 7%; }
+body.render.aspect-9x16 .goal-strap { bottom: 14%; transform: translateX(-50%) scale(0.9); }
+/* film cards: the title at the start of a cut and the result at the end */
+.film-card { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: 18px; background: radial-gradient(120% 90% at 50% 40%, rgba(12, 16, 22, 0.78), rgba(7, 9, 13, 0.96)); text-align: center; padding: 6%; }
+.film-card .fc-mark { font: 900 clamp(34px, 6vw, 84px)/1 var(--display); letter-spacing: 0.04em; color: var(--chalk); }
+.film-card .fc-mark span { color: var(--signal); display: inline-block; transform: skewX(-14deg); }
+.film-card .fc-title { font: 900 clamp(30px, 5vw, 72px)/1.05 var(--display); text-transform: uppercase; color: var(--chalk); max-width: 18ch; animation: cutIn 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.film-card .fc-sub { font: 600 clamp(14px, 1.8vw, 24px)/1.3 var(--ui); color: var(--mist); letter-spacing: 0.04em; max-width: 34ch; }
+
+/* player ID tag: tracks the player's head in the 3D view */
+.player-tag { position: absolute; transform: translate(-50%, -100%); display: inline-flex; align-items: stretch; background: rgba(7, 9, 13, 0.9); border-radius: 6px; overflow: hidden; pointer-events: none; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45); animation: tagIn var(--cut-in) both; }
+.player-tag .bar { width: 5px; background: var(--home); }
+.player-tag .num { display: grid; place-items: center; min-width: 30px; padding: 0 6px; background: var(--chalk); color: var(--ink-950); font: 900 18px/1 var(--display); }
+.player-tag .name { padding: 5px 10px 4px; font: 800 17px/1 var(--display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--chalk); }
+.player-tag::after { content: ""; position: absolute; left: 50%; bottom: -6px; width: 10px; height: 10px; background: rgba(7, 9, 13, 0.9); transform: translateX(-50%) rotate(45deg); }
+@keyframes tagIn { from { opacity: 0; transform: translate(-50%, -80%); } }
+/* goal strap: the big lower third when the ball goes in */
+.goal-strap { position: absolute; left: 50%; bottom: 9%; transform: translateX(-50%); display: inline-flex; align-items: stretch; height: 64px; border-radius: 10px; overflow: hidden; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); animation: strapIn 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.goal-strap .g { display: grid; place-items: center; padding: 0 26px; background: var(--signal); color: var(--ink-950); font: 900 44px/1 var(--display); letter-spacing: 0.04em; transform-origin: left; }
+.goal-strap .who { display: grid; place-items: center; padding: 0 22px; background: var(--ink-950); color: var(--chalk); font: 900 38px/1 var(--display); text-transform: uppercase; letter-spacing: 0.03em; }
+.goal-strap .min { display: grid; place-items: center; padding: 0 16px; background: var(--chalk); color: var(--ink-950); font: 800 26px/1 var(--display); }
+@keyframes strapIn { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+
+/* replay graphics: the broadcast REPLAY bug, the branded wipe between angles, a way back to live */
+.replay-bug { position: absolute; top: 18px; right: 18px; display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; background: rgba(7, 9, 13, 0.88); border-radius: 8px; font: 800 18px/1 var(--display); letter-spacing: 0.12em; color: var(--chalk); }
+.replay-bug .r { display: grid; place-items: center; width: 26px; height: 26px; background: var(--signal); color: var(--ink-950); border-radius: 5px; transform: skewX(-12deg); }
+.replay-bug.slow::after { content: "SLOW MOTION"; font: 700 11px var(--ui); letter-spacing: 0.1em; color: var(--floodlight); margin-left: 4px; }
+.skip-replay { position: absolute; right: 18px; bottom: 18px; background: rgba(7, 9, 13, 0.85); color: var(--chalk); border: 1px solid var(--ink-600); border-radius: var(--r-chip); padding: 7px 12px; font: 600 12px var(--ui); cursor: pointer; }
+.wipe { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.wipe .bar { position: absolute; top: -20%; bottom: -20%; width: 70%; transform: skewX(-18deg); animation: wipeAcross 600ms cubic-bezier(0.7, 0, 0.3, 1) forwards; }
+.wipe .bar.a { background: var(--signal); left: -80%; }
+.wipe .bar.b { background: var(--ink-950); left: -95%; animation-delay: 60ms; }
+.wipe .mark { position: absolute; inset: 0; display: grid; place-items: center; font: 900 clamp(32px, 6vw, 72px)/1 var(--display); color: var(--chalk); letter-spacing: 0.04em; animation: wipeMark 600ms ease forwards; opacity: 0; }
+.wipe .mark span { color: var(--signal); display: inline-block; transform: skewX(-14deg); }
+@keyframes wipeAcross { 0% { left: -95%; } 50% { left: 15%; } 100% { left: 130%; } }
+@keyframes wipeMark { 30% { opacity: 0; } 50% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }
+.segmented { display: inline-flex; border: 1px solid var(--ink-700); border-radius: var(--r-chip); overflow: hidden; }
+.segmented button { background: var(--ink-800); color: var(--mist); border: 0; padding: 7px 12px; font: 700 13px var(--ui); cursor: pointer; }
+.segmented button[aria-pressed="true"] { background: var(--chalk); color: var(--ink-950); }
 
 /* score bug: typography first; score and clock are sacred */
 .scorebug { position: absolute; top: 18px; left: 18px; display: grid; grid-template-columns: auto auto auto auto; align-items: stretch; background: rgba(7, 9, 13, 0.9); border-radius: 8px; overflow: hidden; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35); }
@@ -125,6 +171,40 @@ button.primary:hover { transform: translateY(-1px); }
 .timeline .goal .icon { color: var(--signal); }
 .timeline .x { font-size: 14px; line-height: 1.4; }
 
+/* your cut: the fan's own film */
+.cut-panel { display: grid; gap: 12px; padding: 16px; margin: -2px -2px 18px; border-radius: var(--r-card); background: linear-gradient(160deg, rgba(255, 74, 46, 0.16), rgba(255, 74, 46, 0) 55%), var(--ink-900); border: 1px solid var(--ink-700); position: relative; overflow: hidden; }
+.cut-panel::before { content: ""; position: absolute; inset: 0 auto auto 0; width: 64px; height: 3px; background: var(--signal); }
+.cut-head h2 { font: 900 26px/1 var(--display); text-transform: uppercase; margin: 0 0 4px; letter-spacing: 0.02em; }
+.cut-head p { margin: 0; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; padding: 4px; border-radius: 10px; background: var(--ink-950); border: 1px solid var(--ink-700); }
+.seg button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 7px; padding: 8px 10px; background: transparent; color: var(--mist); font: 700 13px var(--ui); cursor: pointer; transition: background var(--cut-in), color var(--cut-in); }
+.seg button[aria-checked="true"] { background: var(--ink-700); color: var(--chalk); }
+.seg.compact button { padding: 7px 8px; }
+.ar { display: inline-block; border: 1.75px solid currentColor; border-radius: 2px; }
+.ar.portrait { width: 9px; height: 15px; }
+.ar.landscape { width: 15px; height: 9px; }
+.cut-clubs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.club { display: grid; grid-template-columns: 10px 1fr; gap: 2px 10px; align-items: center; text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--ink-700); background: var(--ink-800); color: var(--chalk); cursor: pointer; transition: border-color var(--cut-in), transform var(--cut-in); }
+.club:hover { transform: translateY(-1px); }
+.club .kit { grid-row: span 2; width: 10px; height: 34px; border-radius: 3px; }
+.club .code { font: 900 20px/1 var(--display); letter-spacing: 0.04em; }
+.club .name { font-size: 12px; color: var(--mist); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.club[aria-checked="true"] { border-color: var(--chalk); box-shadow: inset 0 0 0 1px var(--chalk); }
+.cut-field select { width: 100%; }
+.cut-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: stretch; }
+.cut-panel .primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
+.cut-panel .primary[disabled] { opacity: 0.55; cursor: progress; transform: none; }
+.cut-progress p { margin: 8px 0 0; }
+.cut-meter { height: 6px; border-radius: 3px; background: var(--ink-700); overflow: hidden; }
+.cut-meter span { display: block; height: 100%; width: 34%; border-radius: 3px; background: linear-gradient(90deg, var(--signal), var(--floodlight)); animation: meter 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+@keyframes meter { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+.cut-result { display: grid; gap: 10px; }
+.cut-result video { width: 100%; max-height: 520px; border-radius: 10px; background: #000; border: 1px solid var(--ink-700); }
+.cut-actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.ghost { display: inline-flex; justify-content: center; padding: 9px 10px; border-radius: var(--r-chip); border: 1px solid var(--ink-600); background: transparent; color: var(--chalk); font: 700 13px var(--ui); text-decoration: none; cursor: pointer; }
+.ghost:hover { border-color: var(--chalk); }
+.cut-panel .error { margin: 0; }
+
 /* Arabic: its own typeface, and the card reads right to left (the pitch never mirrors) */
 :lang(ar) { font-family: 'IBM Plex Sans Arabic', var(--ui); }
 .cue-text:lang(ar) { font: 700 clamp(18px, 2vw, 26px)/1.5 'IBM Plex Sans Arabic', var(--ui); letter-spacing: 0; }
@@ -144,6 +224,7 @@ button.primary:hover { transform: translateY(-1px); }
 }
 @media (prefers-reduced-motion: reduce) {
   .cue, .timeline li { animation: fade 120ms both; }
+  .cut-meter span { animation: none; width: 100%; opacity: 0.6; }
   .stamp::after, .chip.live .dot, .clock .dot, .score.bump { animation: none; }
   @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 }

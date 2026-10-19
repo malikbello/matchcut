@@ -36,11 +36,12 @@
 | D3 | Tue 20 | Live agents on Foundry with Agent Framework (Analyst ‖ Historian → Writer → Verifier → Localiser) · eval suite v1 · api (SSE) · Studio screen v0 with HLS + synced overlays [**vertical slice live locally**] |
 | D3.2 | Sun 18 to Mon 19 | **Voices and languages (approved 18 Oct):** live voiced commentary of verified lines with Azure Speech (standard British English and Nigerian English `en-NG`, Arabic); captions in English, Nigerian English, Spanish, French, Portuguese, Arabic, Yoruba, Hausa, Igbo and Nigerian Pidgin; language tags (BCP 47, e.g. `pcm`), digit normalisation in the Verifier, Latin-script names everywhere, right-to-left Studio, fonts for tone marks and Arabic; licence and native listening checks for a Yoruba/Hausa/Igbo/Pidgin voice model (voice only if both pass) |
 | D4 | Wed 21 | **Show camera (approved 18 Oct):** real-time 3D (Three.js/WebGL): stadium, crowd, floodlights, shadows, animated CC0 rigged players driven by tracking, replay cameras, post-processing; brand graphics layer · Vision lane v0 on the data camera (auto-labelled detector, tracking, pass/speed inference, scored vs truth) [show camera plays a live match in the browser] |
-| D5 | Thu 22 | Recap lane: Editor, Director, Scriptwriter + timing loop, Voice (Azure Speech), film timeline; films play in the show camera (16:9 and 9:16) with MP4 export; QA job · Package player [**one fan film end to end**] · re-read rules |
-| D6 | Fri 23 | Azure: Bicep/azd for everything, managed identity + RBAC, local auth off, Event Hubs, Container Apps + Jobs, SQL, Storage, SWA, App Insights · CI/CD with OIDC · smoke tests [**live URL**] |
+| D4.5 | Mon 19 to Tue 20 | **Visual overhaul (Malik, 19 Oct: current design far below standard):** art direction against broadcast and game references; real characters with faces, hair, kit textures, names and numbers; detailed stadium; animated crowd; PBR grass; night lighting, grading and post-processing; broadcast graphics package; a visual review gate before moving on [side-by-side against references passes Malik's review] |
+| D5 | Thu 22 | Recap lane: Editor, Director, Scriptwriter + timing loop, Voice (Azure Speech), film timeline; films play in the show camera (16:9 and 9:16) with MP4 export; QA job · Package player [**one fan film end to end**] · re-read rules · **Started 19 Oct (early):** Editor (EDL), virtual-clock renderer, ffmpeg mix, CLI, fan-cut API and Studio panel |
+| D6 | Fri 23 | Azure: Bicep/azd for everything, managed identity + RBAC, local auth off, Event Hubs, Container Apps + Jobs, SQL, Storage, SWA, App Insights · CI/CD with OIDC · smoke tests [**live URL**] · **Started 19 Oct:** Bicep (Container Apps app + queue-triggered job, ACR, Storage, identity, logs), deploy script, OIDC workflow; base infra live. Event Hubs (live lane), SQL and SWA not built yet: decide after the live URL works, then record the as-built shape in an ADR |
 | D7 | Sat 24 | Recap Factory + Analyst screens · 9:16 shareables · native-speaker review of the Nigerian languages and Arabic · motion polish · security hardening · dashboards · docs [UX review against the brand board] |
 | D8 | Sun 25 | Curated demo match (storylines) · record and edit the video (Arcas narration, no music) · pitch text · README · judge guide [video < 2:00 confirmed by ffprobe] |
-| D9 | Mon 26 | Clean-clone test · final QA on the live URL · make the repo public · Malik submits by hand · re-read rules [**submitted**] |
+| D9 | Mon 26 | Redraw the architecture diagrams to match what was built · Clean-clone test · final QA on the live URL · make the repo public · Malik submits by hand · re-read rules [**submitted**] |
 | Buffer | Tue 27 | Buffer only |
 
 ## 4. Cut list (in order, only if behind)
@@ -57,6 +58,8 @@
 ## 5. Roadmap beyond the hackathon
 - **Video-game-quality renders:** an Unreal Engine 5 render node with motion matching and football motion-capture, driven by the same tracking feed (needs GPUs and licensed mocap; weeks of specialist work).
 - **CDF export** for interoperability with any CDF-aware tool.
+- **Real-footage lane (research watch):** Dense4D (Güler, Imperial College London, arXiv 2610.22325, Oct 2026) recovers dense 3D surface tracks of body, clothing and hair from ordinary video in one feed-forward pass. Once its code and licence are out, it could lift a fan's broadcast clip into full-body 3D motion for our replay cameras and commentary, and sharpen the vision lane. Not in the hackathon build: code unreleased, and the rules require synthetic data.
+- **Yoruba, Hausa and Igbo voices in production:** a fine-tune on licence-clean studio data (Google WAXAL, BibleTTS) with spoken numbers in each language and a native listening gate; the language registry already takes new languages without code changes (ADR-0012).
 
 ## 6. Risks
 | Risk | Mitigation |

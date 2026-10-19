@@ -70,6 +70,14 @@
     <section class="stage" aria-label="Match">
       <div class="screen">
         <canvas id="pitch" aria-label="Live positions of all 22 players and the ball" role="img"></canvas>
+        <canvas id="show" class="show" aria-label="3D broadcast view of the match" role="img" hidden></canvas>
+        <div id="show-loading" class="show-loading" hidden><span class="dot" aria-hidden="true"></span>Building the stadium</div>
+        <div id="tag" class="player-tag" hidden><span class="bar" id="tag-bar"></span><span class="num" id="tag-num"></span><span class="name" id="tag-name"></span></div>
+        <div id="goal-strap" class="goal-strap" hidden><span class="g">GOAL</span><span class="who" id="goal-who"></span><span class="min" id="goal-min"></span></div>
+        <div id="film-card" class="film-card" hidden><div class="fc-mark">MATCH<span>C</span>UT</div><div class="fc-title" id="fc-title"></div><div class="fc-sub" id="fc-sub"></div></div>
+        <div id="replay-bug" class="replay-bug" hidden><span class="r">R</span>REPLAY</div>
+        <button type="button" id="skip-replay" class="skip-replay" hidden>Back to live</button>
+        <div id="wipe" class="wipe" hidden aria-hidden="true"><div class="bar a"></div><div class="bar b"></div><div class="mark">MATCH<span>C</span>UT</div></div>
 
         <div class="scorebug" id="scorebug">
           <div class="team home"><span class="kit" id="home-kit"></span><span class="code" id="home-code">HOM</span></div>
@@ -102,6 +110,18 @@
           <div class="track"><div class="progress" id="progress"></div></div>
           <div class="markers" id="markers"></div>
         </div>
+        <div class="segmented" role="group" aria-label="View">
+          <button type="button" id="view-3d" aria-pressed="true">3D</button>
+          <button type="button" id="view-2d" aria-pressed="false">2D</button>
+        </div>
+        <label class="select" id="cam-wrap"><span class="sr-only">Camera</span>
+          <select id="cam">
+            <option value="broadcast" selected>Main camera</option>
+            <option value="tight">Close on the ball</option>
+            <option value="tactical">Tactical</option>
+            <option value="goal">Behind goal</option>
+          </select>
+        </label>
         <label class="select"><span class="sr-only">Speed</span>
           <select id="speed">
             <option value="1">1×</option><option value="5">5×</option><option value="15" selected>15×</option><option value="40">40×</option>
@@ -117,6 +137,39 @@
     </section>
 
     <aside class="rail" aria-label="Moments">
+      <form id="cut" class="cut-panel" autocomplete="off" hidden>
+        <div class="cut-head">
+          <h2>Your cut</h2>
+          <p class="muted small">Your club or your player, in your language, voiced, captioned and ready to share.</p>
+        </div>
+        <div class="seg" role="radiogroup" aria-label="Whose story">
+          <button type="button" role="radio" aria-checked="true" data-focus="side">Club</button>
+          <button type="button" role="radio" aria-checked="false" data-focus="player">Player</button>
+        </div>
+        <div class="cut-clubs" id="cut-clubs" role="radiogroup" aria-label="Club"></div>
+        <label class="select cut-field" id="cut-player-wrap" hidden><span class="sr-only">Player</span><select id="cut-player"></select></label>
+        <div class="cut-row">
+          <label class="select cut-field"><span class="sr-only">Commentary language</span><select id="cut-lang"></select></label>
+          <div class="seg compact" role="radiogroup" aria-label="Format">
+            <button type="button" role="radio" aria-checked="true" data-aspect="9x16"><span class="ar portrait" aria-hidden="true"></span>Phone</button>
+            <button type="button" role="radio" aria-checked="false" data-aspect="16x9"><span class="ar landscape" aria-hidden="true"></span>Wide</button>
+          </div>
+        </div>
+        <button type="submit" class="primary" id="cut-go">Make my cut</button>
+        <div id="cut-progress" class="cut-progress" role="status" aria-live="polite" hidden>
+          <div class="cut-meter"><span></span></div>
+          <p><strong id="cut-state">Queued</strong> <span class="muted small" id="cut-hint"></span></p>
+        </div>
+        <div id="cut-result" class="cut-result" hidden>
+          <video id="cut-video" controls playsinline preload="metadata"></video>
+          <div class="cut-actions">
+            <a class="ghost" id="cut-download" download>Download</a>
+            <button type="button" class="ghost" id="cut-share">Share</button>
+            <button type="button" class="ghost" id="cut-again">New cut</button>
+          </div>
+        </div>
+        <p id="cut-error" class="error small" role="alert" hidden></p>
+      </form>
       <div class="rail-head"><h2>Moments</h2><span class="muted small" id="rail-count"></span></div>
       <ol id="timeline" class="timeline"></ol>
     </aside>
