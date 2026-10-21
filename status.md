@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Mon 19 Oct 2026 · **Phase:** D5 (fan cuts) and D6 (Azure) in progress on `d4/show-camera`, draft PR #8; D3.2 merged (#7)
+**Updated:** Wed 21 Oct 2026 · **Phase:** D6 (Azure live) on `d5/fan-cuts`; D4 and D5 merged (#8)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -15,7 +15,16 @@
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
-## Resume here (handoff, 19 Oct, midday)
+## Resume here (handoff, 21 Oct)
+- **Branch `d5/fan-cuts`** (pushed, no PR yet: GitHub Actions is blocked for this account until the monthly minutes reset, so CI runs locally: format, lint, pyright, tests at 87%, Bicep build). Merge only after the local suite is green.
+- **First fan film made and checked** (Kestrel Bay, English, 9:16, 80.7 s): -16.4 LUFS. Fixed after review: the Studio clock now follows the engine's rule (it showed raw timeline minutes, 2 min ahead of the verified captions); vertical layout for phones; cards lead with the fan's club or player, in their language; encode capped (92 MB to 41 MB, SSIM 0.97); no overlays on cards.
+- **Render speed, measured in the container on CPU:** High 3.8 s a frame (ambient occlusion 2.1 s of it), film tier 1.8 s, invisible difference at film size. The quality governor no longer steps down during films (it was changing quality mid-cut).
+- **Scale-out:** a cut is 10 slices, one queue message each, one job replica each (up to 20 at once within the 100-core quota); the last slice wins an atomic blob claim and assembles. Tests cover slicing and single assembly.
+- **Images are built with local Docker** (ACR Tasks are not allowed on this subscription; GitHub Actions is blocked by billing) and pushed to `crmatchcutcrjdu4fubxrf6.azurecr.io` with `az acr login` from the isolated config. The release identity's OIDC subject uses GitHub's ID form (`malikbello@139644523/matchcut@1423646206`).
+- **Next:** push images, `bash deploy/deploy.sh` with `MATCHCUT_IMAGE_TAG` to create the Studio app and render job, smoke-test, request a cut on Azure and time it; then the PR.
+- Malik: an Entra recommendation suggests turning off user consent to apps in the personal tenant; offered to apply it, waiting for his go-ahead.
+
+## Handoff (19 Oct, midday)
 - **D5 Export my cut, built:** recap Editor (EDL from the feed, cues and calls), headless renderer on a virtual clock (Playwright, Studio `?render=1`), ffmpeg mix (crowd beds, chant, roars, voiced calls with sidechain ducking, -16 LUFS), CLI `matchcut-recap make`. First film (Kestrel Bay, English, 9:16, about 81 s) rendering locally in `out/cuts/`.
 - **Fan cut flow:** `POST /api/cuts` (club or player, language, format; validated, 6 per hour), `GET /api/cuts/{id}`, `GET /media/cuts/{id}.mp4` (byte ranges); Studio "Your cut" panel (watch, download, share). Local back end renders in a background process; Azure back end uses the `cuts` queue and blob container.
 - **D6 Azure:** `infra/main.bicep` (Log Analytics, App Insights, ACR Basic, user-assigned identity with least-privilege roles, Storage with shared keys off, `cuts` queue and blob, `showcase` blob, Container Apps environment, Studio app scaled to zero, recap Container Apps Job with a KEDA queue trigger on managed identity). `deploy/deploy.sh` (infra, showcase bundle, `az acr build`, apps, smoke test). `.github/workflows/deploy.yml` (OIDC, gated by the `MATCHCUT_DEPLOY_ENABLED` variable). Base infra deployed to `rg-matchcut-dev` on 19 Oct. Production access code and session key live outside the repo in `inside-the-game/.secrets/matchcut-prod.env`.
