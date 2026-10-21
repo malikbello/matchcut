@@ -556,10 +556,17 @@ window.__render = {
       const jumped = state.renderPrev === undefined || seg.t < state.renderPrev || seg.t - state.renderPrev > 2000;
       const before = jumped ? seg.t - 1 : state.renderPrev;
       if (jumped) { state.shown = null; $("cue").hidden = true; state.show.endPackage(); }
-      if (seg.kind === "live") for (const c of state.moments) if (c.t_ms > before && c.t_ms <= seg.t) showCue(c);
+      if (seg.cue === undefined && seg.kind === "live") for (const c of state.moments) if (c.t_ms > before && c.t_ms <= seg.t) showCue(c);
       state.t = seg.t;
       state.renderPrev = seg.t;
-      if (state.shown && virtualMs - state.shownAt > CUE_SECONDS * 1000) hideCue();
+      if (seg.cue === undefined && state.shown && virtualMs - state.shownAt > CUE_SECONDS * 1000) hideCue();
+    }
+    // the plan names the caption on screen and its age, so every frame stands alone (films render in slices)
+    if (seg.cue !== undefined) {
+      const want = seg.cue && state.moments.find((c) => c.moment_id === seg.cue);
+      if (want && state.shown?.moment_id !== want.moment_id) showCue(want);
+      if (!want && state.shown) { state.shown = null; $("cue").hidden = true; }
+      if (want) state.shownAt = virtualMs - seg.cueAge * 1000;
     }
     updateBug();
     draw();

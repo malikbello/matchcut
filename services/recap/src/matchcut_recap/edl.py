@@ -27,6 +27,7 @@ GOAL_TAIL_S = 0.6  # the live run-up stops just after the ball crosses the line
 CONCEDED_BEFORE_S, CONCEDED_AFTER_S = 5.0, 1.5
 CHANCE_BEFORE_S, CHANCE_AFTER_S = 6.0, 2.5
 TITLE_S, END_S = 3.0, 4.0
+CAPTION_S = 7.0  # a verified caption's time on screen (the Studio's CUE_SECONDS)
 MAX_FILM_S = 95.0
 VOICE_GAP_S = 0.25
 MAX_VOICE_SHIFT_S = 3.5  # a line that would land later than this after its moment is dropped
@@ -98,6 +99,13 @@ class Cut:
     segments: list[Segment] = field(default_factory=list)
     audio: list[AudioEvent] = field(default_factory=list)
     crowd_high: list[tuple[float, float]] = field(default_factory=list)  # film windows the crowd is up
+    # verified captions on screen: (film start, film end, moment id). The plan owns every overlay,
+    # so each frame is a pure function of its spec and a film can be rendered in slices.
+    captions: list[tuple[float, float, str]] = field(default_factory=list)
+
+    def caption_at(self, film_s: float) -> tuple[str, float] | None:
+        """The caption on screen at film_s and how long it has been up."""
+        return next(((m, film_s - a) for a, b, m in self.captions if a <= film_s < b), None)
 
     @property
     def duration(self) -> float:
@@ -258,15 +266,53 @@ def build_cut(
     )
 
     _voice_track(cut, picks, windows, cues, calls, clip_durations)
+    cut.captions = _captions(cut, cues)
     return cut
 
 
 def frames(cut: Cut, fps: int) -> list[dict[str, Any]]:
-    """The render spec for every output frame, in order."""
+    """The render spec for every output frame, in order, with the caption on screen."""
     out: list[dict[str, Any]] = []
     for seg in cut.segments:
         n = round(seg.duration * fps)
         out.extend(seg.spec_at(i / fps) for i in range(n))
+    for i, spec in enumerate(out):
+        on = cut.caption_at(i / fps)
+        spec["cue"], spec["cueAge"] = (on[0], round(on[1], 4)) if on else (None, 0.0)
+    return out
+
+
+def _captions(cut: Cut, cues: list[dict]) -> list[tuple[float, float, str]]:
+    """Where each moment's caption sits in the film, by the live Studio's rule: it appears when
+    the clock passes the moment during play and stays CAPTION_S; a replay package starting in that
+    time keeps it up to the package's end (the voiced analysis plays over the replay, so the words
+    on screen match the words spoken). It clears when the film jumps to other play or a card."""
+    starts: list[tuple[float, str]] = []
+    clears: list[float] = []
+    packages: list[tuple[float, float]] = []
+    at = 0.0
+    for seg in cut.segments:
+        if seg.kind in ("live", "card"):
+            clears.append(at)
+        if seg.kind == "package":
+            packages.append((at, at + seg.duration))
+        if seg.kind == "live":
+            t_end = seg.t0 + seg.duration * 1000
+            starts += [
+                (at + (c["t_ms"] - seg.t0) / 1000, c["moment_id"])
+                for c in cues
+                if seg.t0 <= c["t_ms"] <= t_end
+            ]
+        at += seg.duration
+    clears.append(at)
+    starts.sort()
+    out = []
+    for k, (start, moment) in enumerate(starts):
+        nxt = starts[k + 1][0] if k + 1 < len(starts) else at
+        clear = min(c for c in clears if c > start)
+        end = start + CAPTION_S
+        end = max([end] + [b for a, b in packages if start <= a < end])
+        out.append((start, min(end, nxt, clear), moment))
     return out
 
 

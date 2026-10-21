@@ -40,6 +40,7 @@ FEED = {
 def _cue(t: int, kind: str, club: str, player: str, audio: str | None = None) -> dict:
     return {
         "t_ms": t,
+        "moment_id": f"MO-{t}",
         "kind": kind,
         "status": "verified",
         "audio": audio,
@@ -174,3 +175,23 @@ def test_the_mix_states_its_output_format_for_older_ffmpeg():
     graph = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"))
     out = next(x for x in graph if "[out]" in x and "loudnorm" in x)
     assert "aformat=sample_fmts=fltp:channel_layouts=stereo[out]" in out  # ffmpeg 5.1 (Debian 12) needs it
+
+
+def test_every_frame_names_its_caption_so_slices_render_alone():
+    cut = build_cut(
+        FEED, CUES, CALLS, focus={"side": "home"}, language="en", aspect="9x16",
+        package_durations=PACKAGES, clip_durations={},
+    )  # fmt: skip
+    specs = frames(cut, 25)
+    assert all("cue" in s and "cueAge" in s for s in specs)
+    shown = [s for s in specs if s["cue"]]
+    assert shown, "goals in the cut must carry their verified captions"
+    assert all(s["kind"] != "card" for s in shown)  # cards stand alone
+    # a goal's caption holds through its replay package (the analysis is voiced over it)
+    first_pkg = next(i for i, s in enumerate(specs) if s["kind"] == "package")
+    assert specs[first_pkg]["cue"]
+    assert specs[first_pkg + 25 * 5]["cue"] == specs[first_pkg]["cue"]
+    # ages grow by one frame at a time while a caption stays up
+    for a, b in itertools.pairwise(specs):
+        if a["cue"] and a["cue"] == b["cue"]:
+            assert abs(b["cueAge"] - a["cueAge"] - 1 / 25) < 1e-3
