@@ -22,11 +22,17 @@ RUN uv sync --locked --no-dev --package matchcut-recap
 
 FROM python:3.12-slim-bookworm
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright PATH="/app/.venv/bin:$PATH"
-COPY --from=app /app /app
+# the environment first (it changes only with the lockfile; our own packages are installed
+# editable), then the heavy system layer, so code changes never re-download the browser or ffmpeg
+COPY --from=app /app/.venv /app/.venv
 # ffmpeg and Mesa from Debian; the headless shell and exactly the libraries it needs from Playwright
-RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg libgl1-mesa-dri libegl1 \
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries \
+    && apt-get update && apt-get install -y --no-install-recommends ffmpeg libgl1-mesa-dri libegl1 \
     && /app/.venv/bin/python -m playwright install --with-deps --only-shell chromium \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=app /app/pyproject.toml /app/uv.lock /app/
+COPY --from=app /app/packages /app/packages
+COPY --from=app /app/services /app/services
 WORKDIR /app
 COPY --from=studio /studio/index.html /studio/studio.js /studio/studio.css /app/apps/studio/
 COPY --from=studio /studio/fonts /app/apps/studio/fonts
