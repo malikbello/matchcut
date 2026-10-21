@@ -68,6 +68,11 @@ class Studio:
         assert self.page
         self.page.evaluate("([s, i, f]) => window.__render.frame(s, i, f)", [spec, index, fps])
 
+    def probe(self) -> dict[str, Any] | None:
+        """Where the drawn ball sits against the striking bone and the controlling player."""
+        assert self.page
+        return self.page.evaluate("() => window.__render.probe()")
+
     def still(self, spec: dict[str, Any], index: int, fps: int, out: Path) -> Path:
         """One frame of the film as a PNG (QA, thumbnails)."""
         assert self.page

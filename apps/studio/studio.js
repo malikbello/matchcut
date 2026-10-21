@@ -535,6 +535,12 @@ window.__render = {
     if (quality) state.show.setQuality(quality);
     return { end: state.end, goals: state.feed.goals, moments: state.moments.length, quality: state.show.quality };
   },
+  probe() {
+    return state.show?.probe?.() ?? null; // motion QA (matchcut-recap realism)
+  },
+  paint(on) {
+    state.show?.setPaint?.(on); // motion QA steps frames without drawing them
+  },
   packageDuration(goalT) {
     const goal = state.feed.goals.find((g) => g.t === goalT);
     return goal ? state.show.packageFor(goal).duration : 0;

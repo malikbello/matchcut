@@ -193,6 +193,33 @@ export async function createShow({
   });
   const ball = ballMesh();
   scene.add(ball);
+  // contact shadow: a soft disc under the ball, tight and dark on the grass, wide and faint in
+  // the air, so the eye always finds the ball and reads its height, as on television
+  const ballShadow = (() => {
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 64;
+    const c = cv.getContext("2d");
+    const g = c.createRadialGradient(32, 32, 0, 32, 32, 32);
+    g.addColorStop(0, "rgba(0,0,0,0.75)");
+    g.addColorStop(0.45, "rgba(0,0,0,0.35)");
+    g.addColorStop(1, "rgba(0,0,0,0)");
+    c.fillStyle = g;
+    c.fillRect(0, 0, 64, 64);
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2),
+      new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), transparent: true, depthWrite: false }),
+    );
+    m.renderOrder = 1;
+    scene.add(m);
+    return m;
+  })();
+  function placeBallShadow() {
+    const h = Math.max(0, ball.position.y - 0.11);
+    const s = 0.34 + h * 0.35;
+    ballShadow.position.set(ball.position.x, 0.012, ball.position.z);
+    ballShadow.scale.set(s, 1, s);
+    ballShadow.material.opacity = THREE.MathUtils.clamp(1 - h / 6, 0.15, 1);
+  }
 
   const camera = new THREE.PerspectiveCamera(30, 16 / 9, 0.5, 900);
   const director = new Director(camera);
@@ -328,41 +355,82 @@ export async function createShow({
         event: eventNear(events[slot], t), snap: snapAll || cutNow || matchDt === 0 || tr.jump,
       });
     }
-    attachBall();
+    attachBall(t);
   }
 
-  // Ball attachment, as sports games do it: the tracked ball is a point, the animated feet are
-  // not, so a ball under control is drawn at the controller's feet in the way he faces (in the
-  // gloves after a catch), blended by distance so possession changes never jump.
   const spot = new THREE.Vector3();
-  function attachBall() {
-    let owner = null;
+  let paint = true; // motion QA steps the match without drawing pixels
+  // Ball truth, as sports games solve it: the tracked ball is a point, the animated feet are not.
+  //  - around an action's contact frame the ball is drawn onto the striking bone (foot, head),
+  //    so the foot meets the ball and the ball leaves along the tracked flight;
+  //  - a keeper's catch holds it in the gloves;
+  //  - a player running with it dribbles: touches on the stride, the ball rolling out ahead;
+  //  - a player standing with it keeps it just ahead of his feet.
+  // The controller is the player nearest the tracked ball while it is on the ground, kept until
+  // someone else is clearly closer, so a defender pressing from behind never takes it by a hair.
+  let controller = null;
+  let controlledSince = 0;
+  let frameNo = 0;
+  let carriedOn = -1; // the frame on which the controller last held the ball (motion QA)
+  let heldMs = 0;
+  function attachBall(t) {
+    let striker = null;
+    for (const pl of players) {
+      if (!pl.root.visible || !pl.strike) continue;
+      if (!striker || pl.strike.w > striker.strike.w) striker = pl;
+    }
+    if (striker) {
+      const near = Math.hypot(striker.root.position.x - ball.position.x, striker.root.position.z - ball.position.z);
+      if (near < 2.5) {
+        ball.position.lerp(striker.strikePoint(spot), striker.strike.w);
+        return;
+      }
+    }
+    let nearest = null;
     let best = 1.3;
     for (const pl of players) {
       if (!pl.root.visible) continue;
-      const near = Math.hypot(pl.root.position.x - ball.position.x, pl.root.position.z - ball.position.z);
-      if (pl.catching && near < 1.5) {
-        // a save the keeper holds: the ball stays with him (a parry leaves, so the rule lets go)
-        owner = pl;
-        best = 0;
-        break;
-      }
       const d = Math.hypot(pl.root.position.x - ball.position.x, pl.root.position.z - ball.position.z);
+      if (pl.catching && d < 1.5) {
+        ball.position.copy(pl.ballSpot(spot)); // a save the keeper holds (a parry leaves, so the rule lets go)
+        controller = pl;
+        return;
+      }
       if (d < best && ball.position.y < 0.6) {
         best = d;
-        owner = pl;
+        nearest = pl;
       }
     }
-    if (!owner) return;
-    const w = owner.catching ? 1 : THREE.MathUtils.clamp((1.3 - best) / 0.6, 0, 1);
-    ball.position.lerp(owner.ballSpot(spot), w); // spin still follows the tracked path (see placeBall)
+    if (!nearest) {
+      controller = null;
+      return;
+    }
+    if (controller !== nearest) {
+      const held = controller && controller.root.visible
+        ? Math.hypot(controller.root.position.x - ball.position.x, controller.root.position.z - ball.position.z)
+        : Infinity;
+      if (held > best + 0.35) {
+        controller = nearest;
+        controlledSince = t;
+      }
+    }
+    const owner = controller ?? nearest;
+    carriedOn = frameNo;
+    heldMs = t - controlledSince;
+    const d = Math.hypot(owner.root.position.x - ball.position.x, owner.root.position.z - ball.position.z);
+    const w = THREE.MathUtils.clamp((1.3 - d) / 0.6, 0, 1);
+    const carried = THREE.MathUtils.clamp((t - controlledSince) / 500, 0, 1); // ease into a dribble
+    const target = owner.speed > 1.4 && !owner.acting ? owner.dribbleSpot(spot, carried) : owner.ballSpot(spot);
+    ball.position.lerp(target, w);
   }
 
   function finish(wallDt, excitement, focus) {
+    frameNo++;
+    placeBallShadow();
     grade.uniforms.uTime.value = wallClock % 100;
     animateCrowd(stadium.crowd, wallClock, excitement);
     director.update(focus ?? ball.position, wallDt);
-    composer.render();
+    if (paint) composer.render();
   }
 
   function render(t, { excitement = null, mode = null } = {}) {
@@ -473,6 +541,24 @@ export async function createShow({
     },
     setMode: (m) => director.setMode(m),
     // where a player's head is on screen (0..1 from the top left), for broadcast ID tags
+    setPaint(on) {
+      paint = Boolean(on);
+    },
+    // motion QA: where the drawn ball sits against the striking bone and the controlling player
+    probe() {
+      const out = { ball: ball.position.toArray(), strike: null, carry: null };
+      const st = players.find((p) => p.root.visible && p.strike && p.strike.w > 0.95);
+      if (st) out.strike = { slot: players.indexOf(st), dist: st.strikePoint(new THREE.Vector3()).distanceTo(ball.position) };
+      if (controller && carriedOn === frameNo - 1 && controller.root.visible && ball.position.y < 0.6) {
+        const dx = ball.position.x - controller.root.position.x;
+        const dz = ball.position.z - controller.root.position.z;
+        out.carry = {
+          slot: players.indexOf(controller), speed: controller.speed, acting: controller.acting, heldMs,
+          ahead: dx * Math.sin(controller.heading) + dz * Math.cos(controller.heading), dist: Math.hypot(dx, dz),
+        };
+      }
+      return out;
+    },
     screenOf(slot) {
       const pl = players[slot];
       if (!pl || !pl.root.visible) return null;

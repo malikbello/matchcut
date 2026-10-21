@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from matchcut_recap.edl import Cut, build_cut, frames
 from matchcut_recap.mix import mix
@@ -146,6 +147,72 @@ def make_part(a: argparse.Namespace) -> tuple[Cut, Path]:
     return cut, part
 
 
+def motion_report(samples: list[dict[str, Any]], fps: int) -> dict[str, Any]:
+    """Score how the drawn ball meets the players over a cut (the realism gate).
+
+    contact: at every frame where an action's striking bone holds the ball, the gap between
+    bone and ball (a foot that misses the ball by a metre reads at once on television).
+    carry: while a player runs with the ball (held at least 0.4 s, so a pass still arriving
+    from behind a runner is not counted), where the ball sits along his heading; a ball behind
+    a running player is the error fans notice first.
+    """
+    gaps = sorted(s["strike"]["dist"] for s in samples if s and s.get("strike"))
+    runs = [
+        (i, s["carry"])
+        for i, s in enumerate(samples)
+        if s
+        and s.get("carry")
+        and s["carry"]["speed"] > 1.4
+        and not s["carry"]["acting"]
+        and s["carry"].get("heldMs", 1e9) >= 400  # an established dribble, not a ball still arriving
+    ]
+    ahead = sorted(c["ahead"] for _, c in runs)
+    behind = [i for i, c in runs if c["ahead"] < -0.1]
+
+    def q(xs: list[float], f: float) -> float | None:
+        return round(xs[min(len(xs) - 1, int(f * len(xs)))], 3) if xs else None
+
+    report = {
+        "frames": len(samples),
+        "contact_frames": len(gaps),
+        "contact_gap_m": {"median": q(gaps, 0.5), "p95": q(gaps, 0.95), "max": gaps[-1] if gaps else None},
+        "carry_frames": len(runs),
+        "carry_ahead_m": {"p5": q(ahead, 0.05), "median": q(ahead, 0.5), "p95": q(ahead, 0.95)},
+        "ball_behind_runner_frames": len(behind),
+        "ball_behind_runner_s": round(len(behind) / fps, 2),
+        "ball_behind_at_s": [round(i / fps, 2) for i in behind[:20]],
+    }
+    report["pass"] = bool(
+        (not gaps or (q(gaps, 0.95) or 0) <= 0.2) and len(behind) <= max(1, len(runs) // 100)
+    )
+    return report
+
+
+def cmd_realism(a: argparse.Namespace) -> dict[str, Any]:
+    """Step through a cut without capturing pixels and measure ball and player contact."""
+    root = Path(a.data)
+    feed = json.loads(gzip.decompress((root / "feeds" / f"{a.match}.json.gz").read_bytes()))
+    cues = _cues(root / "insights" / f"{a.match}.jsonl", a.lang)
+    focus = {"player": a.player} if a.player else {"side": a.side}
+    code = os.environ.get("MATCHCUT_RENDER_CODE", "")
+    with Studio(a.base, code, a.match, a.lang, a.aspect, gpu_less=a.gpu_less, quality=FILM_QUALITY) as studio:
+        packages = {g["t"]: studio.package_duration(g["t"]) for g in feed.get("goals", [])}
+        cut = build_cut(
+            feed, cues, [], focus=focus, language=a.lang, aspect=a.aspect,
+            package_durations=packages, clip_durations={},
+        )  # fmt: skip
+        specs = frames(cut, a.fps)
+        assert studio.page
+        studio.page.evaluate("() => window.__render.paint(false)")  # measure motion, draw nothing
+        samples = []
+        for i, spec in enumerate(specs):
+            studio.step(spec, i, a.fps)
+            samples.append(studio.probe() if spec["kind"] != "card" else None)
+    report = motion_report(samples, a.fps)
+    print(json.dumps(report, indent=1))
+    return report
+
+
 def assemble(a: argparse.Namespace, cut: Cut, parts: list[Path]) -> Path:
     """Join the rendered slices, mix the sound once and mux the film."""
     stem = _stem(a)
@@ -203,7 +270,20 @@ def main(argv: list[str] | None = None) -> None:
     )
     m.add_argument("--chunk", type=int, default=0, help="this machine's slice of the film (0-based)")
     m.add_argument("--chunks", type=int, default=1, help="slices the film is split into across machines")
+    r = sub.add_parser("realism", help="measure how the drawn ball meets the players over a cut")
+    r.add_argument("--match", required=True)
+    rwho = r.add_mutually_exclusive_group(required=True)
+    rwho.add_argument("--side", choices=["home", "away"])
+    rwho.add_argument("--player")
+    r.add_argument("--lang", default="en")
+    r.add_argument("--aspect", choices=["16x9", "9x16"], default="9x16")
+    r.add_argument("--fps", type=int, default=25)
+    r.add_argument("--base", default="http://127.0.0.1:8765")
+    r.add_argument("--data", default="out")
+    r.add_argument("--gpu-less", action="store_true")
     args = p.parse_args(argv)
+    if args.cmd == "realism":
+        sys.exit(0 if cmd_realism(args)["pass"] else 1)
     cmd_make(args)
 
 
