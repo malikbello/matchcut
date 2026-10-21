@@ -218,7 +218,7 @@ def build_cut(
             TITLE_S,
             t0=max(0, first_t),
             title=focus_name,
-            sub=f"{versus}  ·  {words['your_cut']}  ·  {language_name or language}",
+            sub=f"{versus}\n{words['your_cut']}  ·  {language_name or language}",
         )
     )
     windows: list[tuple[float, float, float, float]] = []  # film start, film end, match from, match to
@@ -260,7 +260,7 @@ def build_cut(
             "card",
             END_S,
             t0=last_t,
-            title=f"{words['full_time']}  {score}",
+            title=f"{words['full_time']}\n{score}",
             sub=words["made"],
         )
     )
