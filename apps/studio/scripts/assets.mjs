@@ -34,13 +34,17 @@ const BUILDS = [
   },
 ];
 
-// The football library: the Mixamo soccer pack baked by scripts/blender/mixamo_library.py.
-// Licensed for use inside the product, not for redistribution, so its output goes to a
-// git-ignored folder and deployments fetch it from private storage.
-const privateSrc = path.resolve(here, "../../../assets-private/build");
+// The football library: Microsoft Rocketbox footballers (MIT) moved by the Mixamo soccer pack,
+// baked by scripts/blender/rocketbox_footballers.py (older builds: the Quaternius body, from
+// retarget_library.py). The motion is licensed for use inside the product, not for
+// redistribution, so the output goes to a git-ignored folder and deployments fetch it from
+// private storage.
+import { copyFile, readdir, stat } from "node:fs/promises";
+const exists = (p) => stat(p).then(() => true, () => false);
+const rocketbox = path.resolve(here, "../../../assets-private/build-rb");
+const privateSrc = (await exists(path.join(rocketbox, "football.glb"))) ? rocketbox : path.resolve(here, "../../../assets-private/build");
 const privateOut = path.resolve(here, "../assets/private");
-import { copyFile, stat } from "node:fs/promises";
-const havePrivate = await stat(path.join(privateSrc, "football.glb")).then(() => true, () => false);
+const havePrivate = await exists(path.join(privateSrc, "football.glb"));
 if (havePrivate) {
   BUILDS.push({ from: "football.glb", to: "football.glb", keepMesh: true, clips: null, src: privateSrc, out: privateOut });
 }
@@ -68,7 +72,11 @@ for (const b of BUILDS) {
   await mkdir(b.out ?? out, { recursive: true });
   const file = path.join(b.out ?? out, b.to);
   await io.write(file, doc);
-  if (b.src === privateSrc) await copyFile(path.join(privateSrc, "football.meta.json"), path.join(privateOut, "football.meta.json"));
+  if (b.src === privateSrc) {
+    // clip metadata, and for Rocketbox the kit masks and their UV-to-panel fits
+    const extras = (await readdir(privateSrc)).filter((f) => f === "football.meta.json" || f === "kits.json" || /^kit_.*\.png$/.test(f));
+    for (const f of extras) await copyFile(path.join(privateSrc, f), path.join(privateOut, f));
+  }
   const { size } = await import("node:fs").then((fs) => fs.promises.stat(file));
   console.log(`${b.to}: ${root.listAnimations().length} clips, ${(size / 1024).toFixed(0)} KB`);
 }
