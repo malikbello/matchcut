@@ -12,6 +12,7 @@ publishes the film. Every Azure call uses the job's managed identity: no keys an
               "lang": "en", "aspect": "9x16", "chunk": 3, "chunks": 10}
     blobs:   cuts/<id>.json (status), cuts/<id>.mp4 (the film), cuts/<id>.edl.json (the plan),
              cuts/<id>/claim-03 (a slice started), cuts/<id>/part-03.mp4 (a slice rendered),
+             cuts/<id>/watch-03 (a finished replica watching a late slice),
              cuts/<id>/assemble (the assembler's claim)
 """
 
@@ -26,12 +27,15 @@ import sys
 import time
 import urllib.request
 from argparse import Namespace
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 QUEUE = "cuts"
 CONTAINER = "cuts"
 SCRATCH = Path("/tmp/cuts")  # noqa: S108 - the job's own scratch space
+HEDGE = 1.3  # back up a slice once it runs this many times longer than the watcher's own slice
+TAIL_SHARE = 5  # watch only when at most a fifth of the slices (and at least one) are missing
 
 
 def _status(blobs: Any, cut_id: str, **fields: Any) -> None:
@@ -79,24 +83,75 @@ def make_args(req: dict[str, Any], out: Path) -> Namespace:
     )
 
 
-def render_slice(blobs: Any, req: dict[str, Any]) -> None:
-    """Render this message's slice; if it was the last one, assemble and publish the film."""
+def _parts_missing(blobs: Any, cut_id: str, chunks: int) -> list[int]:
+    have = {b.name for b in blobs.list_blobs(name_starts_with=f"{cut_id}/part-")}
+    return [i for i in range(chunks) if f"{cut_id}/part-{i:02d}.mp4" not in have]
+
+
+def _published(blobs: Any, cut_id: str) -> bool:
+    """The film is out: a slow original or a backup that finishes later must not touch it."""
+    return any(b.name == f"{cut_id}.mp4" for b in blobs.list_blobs(name_starts_with=f"{cut_id}.mp4"))
+
+
+def _claim(blobs: Any, name: str) -> bool:
+    """Create a marker blob only if it does not exist: an atomic claim across replicas."""
     from azure.core.exceptions import ResourceExistsError  # noqa: PLC0415
 
-    from matchcut_recap.cli import assemble, make_part  # noqa: PLC0415
+    try:
+        blobs.upload_blob(name, b"", overwrite=False)
+    except ResourceExistsError:
+        return False
+    return True
+
+
+def render_slice(
+    blobs: Any,
+    req: dict[str, Any],
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Render this message's slice, back up a straggler if the cut is nearly done, and
+    assemble the film if this replica completes it."""
+    from matchcut_recap.cli import make_part  # noqa: PLC0415
 
     cut_id, chunk, chunks = req["id"], int(req.get("chunk", 0)), int(req.get("chunks", 1))
-    args = make_args(req, SCRATCH)
+    if _published(blobs, cut_id):
+        return  # a backup already finished this cut
     blobs.upload_blob(f"{cut_id}/claim-{chunk:02d}", b"", overwrite=True)
-    cut, part = make_part(args)
+    started = clock()
+    cut, part = make_part(make_args(req, SCRATCH))
+    if _published(blobs, cut_id):
+        return
     with part.open("rb") as f:
         blobs.upload_blob(f"{cut_id}/part-{chunk:02d}.mp4", f, overwrite=True)
-    done = [b.name for b in blobs.list_blobs(name_starts_with=f"{cut_id}/part-")]
-    if len(done) < chunks:
-        return
-    try:  # exactly one replica assembles, even when several finish together
-        blobs.upload_blob(f"{cut_id}/assemble", b"", overwrite=False)
-    except ResourceExistsError:
+    took = clock() - started
+    # Backup tasks, as MapReduce runs them: once only the tail of the cut is left, one finished
+    # replica watches each missing slice and renders it too if it runs HEDGE times longer than
+    # this one did. A slow host or a lost replica then costs minutes, not the queue's hour.
+    while missing := _parts_missing(blobs, cut_id, chunks):
+        if len(missing) > max(1, chunks // TAIL_SHARE):
+            return  # most slices are still in flight: nothing is late yet
+        target = next((i for i in missing if _claim(blobs, f"{cut_id}/watch-{i:02d}")), None)
+        if target is None:
+            return  # every late slice already has a watcher
+        deadline = started + HEDGE * took
+        while clock() < deadline and target in _parts_missing(blobs, cut_id, chunks):
+            sleep(10)
+        if target in _parts_missing(blobs, cut_id, chunks):
+            _, backup = make_part(make_args({**req, "chunk": target}, SCRATCH))
+            if _published(blobs, cut_id):
+                return
+            with backup.open("rb") as f:
+                blobs.upload_blob(f"{cut_id}/part-{target:02d}.mp4", f, overwrite=True)
+    _assemble(blobs, req, cut)
+
+
+def _assemble(blobs: Any, req: dict[str, Any], cut: Any) -> None:
+    """Join the slices and publish the film; exactly one replica does it."""
+    from matchcut_recap.cli import assemble  # noqa: PLC0415
+
+    cut_id, chunks = req["id"], int(req.get("chunks", 1))
+    if _published(blobs, cut_id) or not _claim(blobs, f"{cut_id}/assemble"):
         return
     parts = []
     for i in range(chunks):
@@ -104,7 +159,7 @@ def render_slice(blobs: Any, req: dict[str, Any]) -> None:
         with local.open("wb") as f:
             blobs.download_blob(f"{cut_id}/part-{i:02d}.mp4").readinto(f)
         parts.append(local)
-    film = assemble(args, cut, parts)
+    film = assemble(make_args(req, SCRATCH), cut, parts)
     with film.open("rb") as f:
         blobs.upload_blob(f"{cut_id}.mp4", f, overwrite=True)
     plan = json.dumps(cut.as_dict(), ensure_ascii=False).encode()

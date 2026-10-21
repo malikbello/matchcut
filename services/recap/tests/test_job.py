@@ -80,3 +80,52 @@ def test_message_fields_become_render_arguments(tmp_path):
         10,
         True,
     )
+
+
+class FakeClock:
+    """Time moves only when the code under test sleeps (or a slice renders)."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, s):
+        self.now += s
+
+
+def test_a_late_slice_is_backed_up_and_the_slow_original_changes_nothing(fake_render, monkeypatch):
+    blobs = FakeBlobs()
+    clock = FakeClock()
+    renders = []
+    original = cli.make_part
+
+    def timed_make_part(args):
+        renders.append(args.chunk)
+        clock.now += 300  # every render takes 300 s on a healthy host
+        return original(args)
+
+    monkeypatch.setattr(cli, "make_part", timed_make_part)
+    req = {"id": "c-0123456789ab", "match": "kes-wcr-7", "side": "home", "chunks": 5}
+    blobs.upload_blob("c-0123456789ab/claim-04", b"")  # slice 4's host is slow: claimed, not done
+    for chunk in (0, 1, 2, 3):
+        clock.now = 0.0
+        job.render_slice(blobs, {**req, "chunk": chunk}, clock=clock, sleep=clock.sleep)
+    assert renders == [0, 1, 2, 3, 4]  # slice 3's replica watched slice 4, then rendered it
+    assert fake_render == [[b"part0", b"part1", b"part2", b"part3", b"part4"]]
+    film = blobs.data["c-0123456789ab.mp4"]
+    # the slow original finally finishes: no upload, no second assembly, the film stands
+    job.render_slice(blobs, {**req, "chunk": 4}, clock=clock, sleep=clock.sleep)
+    assert blobs.data["c-0123456789ab.mp4"] == film
+    assert len(fake_render) == 1
+    assert not [n for n in blobs.data if n.startswith("c-0123456789ab/")]
+
+
+def test_nobody_waits_while_most_slices_are_still_rendering(fake_render):
+    blobs = FakeBlobs()
+    clock = FakeClock()
+    req = {"id": "c-0123456789ab", "match": "kes-wcr-7", "side": "home", "chunks": 10}
+    job.render_slice(blobs, {**req, "chunk": 0}, clock=clock, sleep=clock.sleep)
+    assert clock.now == 0.0  # returned at once: 9 of 10 slices missing is normal, not late
+    assert not [n for n in blobs.data if "/watch-" in n]
