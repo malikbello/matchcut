@@ -68,7 +68,10 @@ def mix_command(cut: Cut, media_root: Path, crowd_dir: Path, out: Path, ffmpeg: 
         filters.append("[ducked][vo_mix]amix=inputs=2:normalize=0:duration=first[mix]")
     else:
         filters.append("[crowd]anull[mix]")
-    filters.append("[mix]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000[out]")
+    # explicit output format: older ffmpeg (Debian 12 ships 5.1) cannot infer the layout here
+    filters.append(
+        "[mix]loudnorm=I=-16:TP=-1.5:LRA=11,aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[out]"
+    )
     args += [
         "-filter_complex",
         ";".join(filters),
