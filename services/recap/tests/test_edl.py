@@ -164,3 +164,13 @@ def test_cards_lead_with_the_fan_and_speak_their_language():
     assert pcm.segments[0].title == "Westcroft United"
     assert pcm.segments[0].sub.startswith("v Kestrel Bay FC")
     assert pcm.segments[-1].title.startswith("Full time")  # Nigerian captions use the English cards
+
+
+def test_the_mix_states_its_output_format_for_older_ffmpeg():
+    cut = build_cut(
+        FEED, CUES, CALLS, focus={"side": "home"}, language="en", aspect="9x16",
+        package_durations=PACKAGES, clip_durations={},
+    )  # fmt: skip
+    graph = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"))
+    out = next(x for x in graph if "[out]" in x and "loudnorm" in x)
+    assert "aformat=sample_fmts=fltp:channel_layouts=stereo[out]" in out  # ffmpeg 5.1 (Debian 12) needs it
