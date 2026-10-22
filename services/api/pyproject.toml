@@ -5,6 +5,7 @@ description = "Matchcut API: access sessions, cue streams over Server-Sent Event
 requires-python = ">=3.12"
 dependencies = [
     "matchcut-contracts",
+    "matchcut-editing",
     "fastapi>=0.120",
     "uvicorn>=0.40",
     "sse-starlette>=3.0",

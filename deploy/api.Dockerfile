@@ -19,6 +19,8 @@ COPY services services
 RUN uv sync --locked --no-dev --package matchcut-api
 
 FROM python:3.12-slim-bookworm
+# ffmpeg: fan cuts are assembled here from pre-rendered pieces (a lossless join and a sound mix)
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries     && apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 RUN useradd --uid 10001 --create-home matchcut
 WORKDIR /app
 COPY --from=app /app /app

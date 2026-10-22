@@ -9,11 +9,12 @@ readme = "README.md"
 package = false
 
 [tool.uv.workspace]
-members = ["packages/contracts", "packages/analytics", "services/sim", "services/league-memory", "services/renderer", "services/insights", "services/api", "services/recap"]
+members = ["packages/contracts", "packages/analytics", "packages/editing", "services/sim", "services/league-memory", "services/renderer", "services/insights", "services/api", "services/recap"]
 
 [tool.uv.sources]
 matchcut-contracts = { workspace = true }
 matchcut-analytics = { workspace = true }
+matchcut-editing = { workspace = true }
 matchcut-sim = { workspace = true }
 matchcut-memory = { workspace = true }
 matchcut-renderer = { workspace = true }
@@ -25,6 +26,7 @@ matchcut-recap = { workspace = true }
 dev = [
   "matchcut-contracts",
   "matchcut-analytics",
+  "matchcut-editing",
   "matchcut-sim",
   "matchcut-memory",
   "matchcut-renderer",
@@ -59,6 +61,7 @@ ignore = [
 "services/sim/src/matchcut_sim/engine.py" = ["PLR0912", "PLR0915"]  # decision logic reads best as one function
 "services/sim/src/matchcut_sim/league.py" = ["E501"]                # club data table, one club per line
 "services/sim/src/matchcut_sim/cli.py" = ["PLR0915"]                # argparse wiring: one block per command
+"services/recap/src/matchcut_recap/cli.py" = ["PLR0915"]            # argparse wiring: one block per command
 "packages/analytics/src/matchcut_analytics/state.py" = ["PLR0912", "PLR0915"]    # one branch per event type
 "packages/analytics/src/matchcut_analytics/moments.py" = ["PLR0912"]               # one branch per event type
 "services/insights/src/matchcut_insights/plain.py" = ["PLR0912"]                    # one template per moment kind
@@ -78,7 +81,7 @@ testpaths = ["packages", "services"]
 addopts = "-q --strict-markers"
 
 [tool.coverage.run]
-source = ["matchcut_contracts", "matchcut_analytics", "matchcut_sim", "matchcut_memory", "matchcut_renderer", "matchcut_insights", "matchcut_api"]
+source = ["matchcut_contracts", "matchcut_analytics", "matchcut_editing", "matchcut_sim", "matchcut_memory", "matchcut_renderer", "matchcut_insights", "matchcut_api"]
 branch = true
 
 [tool.coverage.report]

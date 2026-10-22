@@ -28,6 +28,9 @@ CONCEDED_BEFORE_S, CONCEDED_AFTER_S = 5.0, 1.5
 CHANCE_BEFORE_S, CHANCE_AFTER_S = 6.0, 2.5
 TITLE_S, END_S = 3.0, 4.0
 CAPTION_S = 7.0  # a verified caption's time on screen (the Studio's CUE_SECONDS)
+MIN_CAPTION_S = 2.0  # a caption that would be on screen for less never airs (unreadable, a flicker)
+# captions a film may show besides its own language: Nigerian films read English lines too
+CAPTION_LANGUAGES = {"en-NG": {"en-NG", "en"}, "pcm": {"pcm", "en-NG", "en"}}
 MAX_FILM_S = 95.0
 VOICE_GAP_S = 0.25
 MAX_VOICE_SHIFT_S = 3.5  # a line that would land later than this after its moment is dropped
@@ -71,6 +74,7 @@ class Segment:
     goal_t: int | None = None  # package
     title: str = ""
     sub: str = ""
+    clip: str = ""  # the reusable clip this segment belongs to (title, goal-<t>, chance-<t>, end...)
 
     def spec_at(self, local_s: float) -> dict[str, Any]:
         """What the Studio's render mode should show local_s seconds into this segment."""
@@ -102,6 +106,8 @@ class Cut:
     # verified captions on screen: (film start, film end, moment id). The plan owns every overlay,
     # so each frame is a pure function of its spec and a film can be rendered in slices.
     captions: list[tuple[float, float, str]] = field(default_factory=list)
+    # stretches of play: (film start, film end, match from, match to), where calls and lines land
+    windows: list[tuple[float, float, float, float]] = field(default_factory=list)
 
     def caption_at(self, film_s: float) -> tuple[str, float] | None:
         """The caption on screen at film_s and how long it has been up."""
@@ -110,6 +116,14 @@ class Cut:
     @property
     def duration(self) -> float:
         return sum(s.duration for s in self.segments)
+
+    def clip_order(self) -> list[str]:
+        """The reusable clips this cut is made of, in order (assembly joins exactly these)."""
+        order: list[str] = []
+        for s in self.segments:
+            if s.clip and (not order or order[-1] != s.clip):
+                order.append(s.clip)
+        return order
 
     def as_dict(self) -> dict[str, Any]:
         d = asdict(self)
@@ -204,70 +218,150 @@ def build_cut(
 ) -> Cut:
     home, away = feed["teams"]["home"], feed["teams"]["away"]
     picks = _fit(pick_moments(feed, cues, focus), package_durations)
-    focus_name = focus.get("player") or feed["teams"][focus.get("side", "home")]["name"]
-    title = f"{home['name']} v {away['name']}"
-    words = CARD_WORDS.get(language, CARD_WORDS["en"])
-    # the title names the fan's club or player; the line under it never repeats it
-    side = focus.get("side")
-    versus = f"v {feed['teams']['away' if side == 'home' else 'home']['name']}" if side else title
-    cut = Cut(feed["match_id"], language, aspect, focus_name, title)
-    first_t = picks[0]["t"] - RUN_UP_S * 1000 if picks else 0
-    cut.segments.append(
-        Segment(
-            "card",
-            TITLE_S,
-            t0=max(0, first_t),
-            title=focus_name,
-            sub=f"{versus}\n{words['your_cut']}  ·  {language_name or language}",
-        )
-    )
-    windows: list[tuple[float, float, float, float]] = []  # film start, film end, match from, match to
-    at = TITLE_S
-    for p in picks:
-        if p["kind"] == "goal":
-            start_ms = p["t"] - RUN_UP_S * 1000
-            seg = Segment("live", RUN_UP_S + GOAL_TAIL_S, t0=start_ms)
-            cut.segments.append(seg)
-            windows.append((at, at + seg.duration, start_ms, p["t"] + GOAL_TAIL_S * 1000))
-            cut.audio.append(AudioEvent(at + RUN_UP_S, "roar", "roar"))
-            at += seg.duration
-            dur = package_durations.get(p["t"], 0.0)
-            if dur > 0:
-                cut.segments.append(Segment("package", dur, goal_t=p["t"]))
-                cut.crowd_high.append((at - 1.0, at + dur))
-                p["package_at"] = at
-                at += dur
-        else:
-            before, after = (
-                (CONCEDED_BEFORE_S, CONCEDED_AFTER_S)
-                if p["kind"] == "conceded"
-                else (CHANCE_BEFORE_S, CHANCE_AFTER_S)
-            )
-            start_ms = p["t"] - before * 1000
-            seg = Segment("live", before + after, t0=start_ms)
-            cut.segments.append(seg)
-            windows.append((at, at + seg.duration, start_ms, start_ms + seg.duration * 1000))
-            if p["kind"] == "chance":
-                cut.crowd_high.append((at + before - 2.0, at + before + 1.5))
-            at += seg.duration
-    score = (
-        f"{home['code']} {sum(1 for g in feed.get('goals', []) if g['side'] == 'home')}-"
-        f"{sum(1 for g in feed.get('goals', []) if g['side'] == 'away')} {away['code']}"
-    )
-    last_t = feed["t"][-1] if feed.get("t") else 0
-    cut.segments.append(
-        Segment(
-            "card",
-            END_S,
-            t0=last_t,
-            title=f"{words['full_time']}\n{score}",
-            sub=words["made"],
-        )
-    )
-
-    _voice_track(cut, picks, windows, cues, calls, clip_durations)
+    title = title_card(feed, focus, language, language_name)
+    cut = Cut(feed["match_id"], language, aspect, title.title, f"{home['name']} v {away['name']}")
+    cut.segments.append(title)
+    _lay_out(cut, picks, TITLE_S, package_durations)
+    cut.segments.append(end_card(feed, language))
+    _voice_track(cut, picks, cut.windows, cues, calls, clip_durations)
     cut.captions = _captions(cut, cues)
     return cut
+
+
+def moment_cut(
+    feed: dict,
+    cues: list[dict],
+    calls: list[dict],
+    key: str,
+    *,
+    language: str,
+    aspect: str,
+    package_durations: dict[int, float],
+    clip_durations: dict[str, float],
+) -> Cut:
+    """One moment as its own short film, for the live reel and for sharing a single moment: the
+    moment's clip with its soundtrack (calls, verified line, crowd), no cards."""
+    kind, t = key.rsplit("-", 1)
+    picks = [{"kind": kind, "t": int(t), "who": _scorer(feed, int(t)) if kind != "chance" else None}]
+    home, away = feed["teams"]["home"], feed["teams"]["away"]
+    cut = Cut(feed["match_id"], language, aspect, key, f"{home['name']} v {away['name']}")
+    _lay_out(cut, picks, 0.0, package_durations)
+    _voice_track(cut, picks, cut.windows, cues, calls, clip_durations)
+    cut.captions = _captions(cut, cues)
+    return cut
+
+
+def _lay_out(cut: Cut, picks: list[dict], at: float, package_durations: dict[int, float]) -> None:
+    """Append each picked moment's clip to the cut, with its crowd swells and roars."""
+    for p in picks:
+        segs = moment_segments(p["kind"], p["t"], package_durations)
+        live = segs[0]
+        cut.segments.extend(segs)
+        if p["kind"] == "goal":
+            cut.windows.append((at, at + live.duration, live.t0, p["t"] + GOAL_TAIL_S * 1000))
+            cut.audio.append(AudioEvent(at + RUN_UP_S, "roar", "roar"))
+            at += live.duration
+            if len(segs) > 1:
+                cut.crowd_high.append((at - 1.0, at + segs[1].duration))
+                p["package_at"] = at
+                at += segs[1].duration
+        else:
+            cut.windows.append((at, at + live.duration, live.t0, live.t0 + live.duration * 1000))
+            if p["kind"] == "chance":
+                cut.crowd_high.append((at + CHANCE_BEFORE_S - 2.0, at + CHANCE_BEFORE_S + 1.5))
+            at += live.duration
+
+
+def title_card(feed: dict, focus: dict[str, str], language: str, language_name: str = "") -> Segment:
+    """The opening card: the fan's club or player, the fixture, the language. The backdrop is
+    kick-off for every fan, so a title clip depends only on its words (rendered once each)."""
+    home, away = feed["teams"]["home"], feed["teams"]["away"]
+    words = CARD_WORDS.get(language, CARD_WORDS["en"])
+    focus_name = focus.get("player") or feed["teams"][focus.get("side", "home")]["name"]
+    side = focus.get("side")
+    # the title names the fan's club or player; the line under it never repeats it
+    versus = (
+        f"v {feed['teams']['away' if side == 'home' else 'home']['name']}"
+        if side
+        else f"{home['name']} v {away['name']}"
+    )
+    return Segment(
+        "card",
+        TITLE_S,
+        t0=0,
+        title=focus_name,
+        sub=f"{versus}\n{words['your_cut']}  ·  {language_name or language}",
+        clip=f"title-{slug(focus_name)}",
+    )
+
+
+def end_card(feed: dict, language: str) -> Segment:
+    """The closing card: full time, the score, every line verified."""
+    home, away = feed["teams"]["home"], feed["teams"]["away"]
+    words = CARD_WORDS.get(language, CARD_WORDS["en"])
+    goals = feed.get("goals", [])
+    score = (
+        f"{home['code']} {sum(1 for g in goals if g['side'] == 'home')}-"
+        f"{sum(1 for g in goals if g['side'] == 'away')} {away['code']}"
+    )
+    last_t = feed["t"][-1] if feed.get("t") else 0
+    return Segment(
+        "card", END_S, t0=last_t, title=f"{words['full_time']}\n{score}", sub=words["made"], clip="end"
+    )
+
+
+def slug(name: str) -> str:
+    """A file-safe key for a club or player name (title clips are stored per focus)."""
+    out = "".join(c.lower() if c.isalnum() else "-" for c in name)
+    return "-".join(w for w in out.split("-") if w)
+
+
+def moment_segments(kind: str, t: int, package_durations: dict[int, float]) -> list[Segment]:
+    """The segments of one moment's reusable clip: a goal is its run-up then its package
+    (celebration and replays); a conceded goal and a chance are a short stretch of play."""
+    key = f"{kind}-{t}"
+    if kind == "goal":
+        segs = [Segment("live", RUN_UP_S + GOAL_TAIL_S, t0=t - RUN_UP_S * 1000, clip=key)]
+        dur = package_durations.get(t, 0.0)
+        if dur > 0:
+            segs.append(Segment("package", dur, goal_t=t, clip=key))
+        return segs
+    before, after = (
+        (CONCEDED_BEFORE_S, CONCEDED_AFTER_S) if kind == "conceded" else (CHANCE_BEFORE_S, CHANCE_AFTER_S)
+    )
+    return [Segment("live", before + after, t0=t - before * 1000, clip=key)]
+
+
+def clip_plan(feed: dict, cues: list[dict], package_durations: dict[int, float]) -> dict[str, list[Segment]]:
+    """Every reusable moment clip of a match: each goal as a goal and as a goal conceded, and
+    each big chance or great save away from a goal. Any fan's cut is made of these (plus cards),
+    so each is rendered once, whatever the number of fans."""
+    plan: dict[str, list[Segment]] = {}
+    goal_times = [g["t"] for g in feed.get("goals", [])]
+    for t in goal_times:
+        for kind in ("goal", "conceded"):
+            plan[f"{kind}-{t}"] = moment_segments(kind, t, package_durations)
+    for c in cues:
+        if c.get("kind") in CHANCE_KINDS and not any(abs(c["t_ms"] - gt) < 15000 for gt in goal_times):
+            plan[f"chance-{c['t_ms']}"] = moment_segments("chance", c["t_ms"], package_durations)
+    return plan
+
+
+def clip_frames(segments: list[Segment], fps: int) -> list[dict[str, Any]]:
+    """Render specs for one reusable clip, captions off (captions are added per language)."""
+    out: list[dict[str, Any]] = []
+    for seg in segments:
+        out.extend(seg.spec_at(i / fps) for i in range(round(seg.duration * fps)))
+    for spec in out:
+        spec["cue"], spec["cueAge"] = None, 0.0
+    return out
+
+
+def clip_captions(
+    segments: list[Segment], cues: list[dict], language: str = ""
+) -> list[tuple[float, float, str]]:
+    """Caption windows inside one clip, in the clip's own seconds (the same rule as a whole cut)."""
+    return _captions(Cut("", language, "", "", "", segments=list(segments)), cues)
 
 
 def frames(cut: Cut, fps: int) -> list[dict[str, Any]]:
@@ -286,7 +380,10 @@ def _captions(cut: Cut, cues: list[dict]) -> list[tuple[float, float, str]]:
     """Where each moment's caption sits in the film, by the live Studio's rule: it appears when
     the clock passes the moment during play and stays CAPTION_S; a replay package starting in that
     time keeps it up to the package's end (the voiced analysis plays over the replay, so the words
-    on screen match the words spoken). It clears when the film jumps to other play or a card."""
+    on screen match the words spoken). It clears when the film jumps to other play or a card.
+    A film shows only lines in its own language, and a line that would be replaced or cut away
+    within MIN_CAPTION_S never airs: the later, bigger moment (the goal) keeps the screen."""
+    allowed = CAPTION_LANGUAGES.get(cut.language, {cut.language})
     starts: list[tuple[float, str]] = []
     clears: list[float] = []
     packages: list[tuple[float, float]] = []
@@ -302,6 +399,7 @@ def _captions(cut: Cut, cues: list[dict]) -> list[tuple[float, float, str]]:
                 (at + (c["t_ms"] - seg.t0) / 1000, c["moment_id"])
                 for c in cues
                 if seg.t0 <= c["t_ms"] <= t_end
+                and (not cut.language or c.get("language", cut.language) in allowed)
             ]
         at += seg.duration
     clears.append(at)
@@ -312,7 +410,9 @@ def _captions(cut: Cut, cues: list[dict]) -> list[tuple[float, float, str]]:
         clear = min(c for c in clears if c > start)
         end = start + CAPTION_S
         end = max([end] + [b for a, b in packages if start <= a < end])
-        out.append((start, min(end, nxt, clear), moment))
+        end = min(end, nxt, clear)
+        if end - start >= MIN_CAPTION_S:
+            out.append((start, end, moment))
     return out
 
 
@@ -324,16 +424,11 @@ def _voice_track(
     calls: list[dict],
     clip_durations: dict[str, float],
 ) -> None:
-    """Calls and verified lines where they happen in the film, never over one another."""
+    """Calls and verified lines where they happen in the film, never over one another. As a
+    broadcast does it, the call owns the goal and the analysis owns the replay: a goal's verified
+    line is voiced over the first replay angle, never stacked on the call."""
     wanted: list[tuple[float, str, str]] = []
-    for film_a, _film_b, m_from, m_to in windows:
-        for c in calls:
-            if c.get("audio") and m_from <= c["t_ms"] <= m_to:
-                wanted.append((film_a + (c["t_ms"] - m_from) / 1000, c["audio"], "call"))
-        for c in cues:
-            if c.get("audio") and c.get("status") == "verified" and m_from <= c["t_ms"] <= m_to:
-                wanted.append((film_a + (c["t_ms"] - m_from) / 1000 + 0.4, c["audio"], "line"))
-    played_lines = {f for _, f, role in wanted if role == "line"}
+    over_replay: dict[str, float] = {}
     for p in picks:
         if p["kind"] != "goal" or "package_at" not in p:
             continue
@@ -348,10 +443,17 @@ def _voice_track(
             ),
             None,
         )
-        if line and line["audio"] not in played_lines:
-            wanted.append(
-                (p["package_at"] + REPLAY_ANALYSIS_AT_S, line["audio"], "line")
-            )  # analysis over the replay
+        if line:
+            over_replay[line["audio"]] = p["package_at"] + REPLAY_ANALYSIS_AT_S
+    for film_a, _film_b, m_from, m_to in windows:
+        for c in calls:
+            if c.get("audio") and m_from <= c["t_ms"] <= m_to:
+                wanted.append((film_a + (c["t_ms"] - m_from) / 1000, c["audio"], "call"))
+        for c in cues:
+            ours = c.get("audio") and c.get("status") == "verified" and m_from <= c["t_ms"] <= m_to
+            if ours and c["audio"] not in over_replay:
+                wanted.append((film_a + (c["t_ms"] - m_from) / 1000 + 0.4, c["audio"], "line"))
+    wanted += [(at, f, "line") for f, at in over_replay.items()]
     free_at = 0.0
     for t, f, role in sorted(wanted):
         d = clip_durations.get(f, 2.5)

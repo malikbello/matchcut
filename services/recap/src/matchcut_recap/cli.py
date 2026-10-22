@@ -14,69 +14,19 @@ import gzip
 import json
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-from matchcut_recap.edl import Cut, build_cut, frames
-from matchcut_recap.mix import mix
+from matchcut_editing.edl import Cut, build_cut, frames
+from matchcut_editing.inputs import LANGUAGE_NAMES
+from matchcut_editing.inputs import best_cues as _cues
+from matchcut_editing.inputs import voice_durations as _durations
+from matchcut_editing.mix import mix
+
 from matchcut_recap.render import FILM_QUALITY, Studio, concat, mux
 
 WARMUP_S = 2  # seconds of uncaptured frames before a slice or still, so motion settles
-
-LANGUAGE_NAMES = {
-    "en": "English",
-    "en-NG": "Nigerian English",
-    "pcm": "Naija",
-    "yo": "Yorùbá",
-    "ha": "Hausa",
-    "ig": "Igbo",
-    "ar": "العربية",
-    "es": "Español",
-    "fr": "Français",
-    "pt": "Português",
-}
-
-
-def _cues(path: Path, lang: str) -> list[dict]:
-    """The best cue per moment in this language (a verified line replaces the plain card)."""
-    rows = [json.loads(x) for x in path.read_text(encoding="utf-8").splitlines() if x]
-    rank = {"verified": 2, "plain": 0, "rejected": -1}
-    best: dict[str, dict] = {}
-    for r in rows:
-        if r["language"] != lang and not (r["language"] == "en" and r["status"] == "plain"):
-            continue
-        prev = best.get(r["moment_id"])
-        score = rank[r["status"]] + (r["language"] == lang)
-        if prev is None or score > rank[prev["status"]] + (prev["language"] == lang):
-            best[r["moment_id"]] = r
-    return sorted(best.values(), key=lambda r: r["t_ms"])
-
-
-def _durations(files: set[str], media_root: Path, ffprobe: str) -> dict[str, float]:
-    out = {}
-    for f in files:
-        r = subprocess.run(  # noqa: S603 - our own arguments
-            [
-                ffprobe,
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "csv=p=0",
-                str(media_root / f),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        try:
-            out[f] = float(r.stdout.strip())
-        except ValueError:
-            continue
-    return out
 
 
 def chunk_range(total: int, chunk: int, chunks: int) -> range:
@@ -240,6 +190,67 @@ def cmd_make(a: argparse.Namespace) -> Path:
     return assemble(a, cut, [part])
 
 
+def _pieces_dir(a: argparse.Namespace) -> Path:
+    d = Path(a.out) / a.match / a.aspect
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def write_manifest(folder: Path, packages: dict[int, float], plan: dict[str, list], fps: int) -> Path:
+    """What the API needs to assemble cuts from the pieces: each goal's replay package length (the
+    Studio measures it) and every clip's duration."""
+    manifest = {
+        "fps": fps,
+        "packages": {str(t): d for t, d in packages.items()},
+        "clips": {k: round(sum(s.duration for s in segs), 3) for k, segs in plan.items()},
+    }
+    path = folder / "manifest.json"
+    path.write_text(json.dumps(manifest, indent=1), encoding="utf-8")
+    return path
+
+
+def cmd_clip(a: argparse.Namespace) -> list[Path]:
+    """Render moment clips (all slices on this machine) and caption them in every language."""
+    from matchcut_editing.edl import clip_plan  # noqa: PLC0415
+    from matchcut_editing.inputs import VOICED  # noqa: PLC0415
+
+    from matchcut_recap.clips import finish_clip, render_clip_part  # noqa: PLC0415
+
+    data, folder = Path(a.data), _pieces_dir(a)
+    langs = a.langs.split(",") if a.langs else VOICED
+    feed = json.loads(gzip.decompress((data / "feeds" / f"{a.match}.json.gz").read_bytes()))
+    cues = _cues(data / "insights" / f"{a.match}.jsonl", "en")
+    code = os.environ.get("MATCHCUT_RENDER_CODE", "")
+    made: list[Path] = []
+    with Studio(a.base, code, a.match, "en", a.aspect, gpu_less=a.gpu_less) as studio:
+        packages = {g["t"]: studio.package_duration(g["t"]) for g in feed.get("goals", [])}
+        plan = clip_plan(feed, cues, packages)
+        write_manifest(folder, packages, plan, a.fps)
+        keys = a.keys.split(",") if a.keys else list(plan)
+        for key in keys:
+            part = render_clip_part(studio, plan[key], a.fps, 0, 1, folder / f"{key}.part00.mp4")
+            pieces = finish_clip(studio, key, plan[key], [part], data, a.match, langs, folder, a.ffmpeg)
+            made += list(pieces.values())
+            print(f"clip {key}: {', '.join(sorted(pieces))}", flush=True)
+    return made
+
+
+def cmd_cards(a: argparse.Namespace) -> list[Path]:
+    """Render the title cards (every focus, every language) and the end cards."""
+    from matchcut_editing.inputs import VOICED, focuses  # noqa: PLC0415
+
+    from matchcut_recap.clips import render_cards  # noqa: PLC0415
+
+    data, folder = Path(a.data), _pieces_dir(a)
+    langs = a.langs.split(",") if a.langs else VOICED
+    feed = json.loads(gzip.decompress((data / "feeds" / f"{a.match}.json.gz").read_bytes()))
+    code = os.environ.get("MATCHCUT_RENDER_CODE", "")
+    with Studio(a.base, code, a.match, "en", a.aspect, gpu_less=a.gpu_less) as studio:
+        made = render_cards(studio, data, a.match, focuses(feed), langs, folder, a.ffmpeg)
+    print(f"cards: {len(made)}")
+    return list(made.values())
+
+
 def main(argv: list[str] | None = None) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")  # pyright: ignore[reportAttributeAccessIssue]
@@ -281,7 +292,28 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--base", default="http://127.0.0.1:8765")
     r.add_argument("--data", default="out")
     r.add_argument("--gpu-less", action="store_true")
+    for name, helptext in (
+        ("clip", "render moment clips and caption them per language"),
+        ("cards", "render title and end cards"),
+    ):
+        c = sub.add_parser(name, help=helptext)
+        c.add_argument("--match", required=True)
+        c.add_argument("--aspect", choices=["16x9", "9x16"], default="9x16")
+        c.add_argument("--fps", type=int, default=25)
+        c.add_argument("--langs", help="comma-separated; default: every voiced language")
+        c.add_argument("--keys", help="clip keys (goal-<t>, chance-<t>...); default: all")
+        c.add_argument("--base", default="http://127.0.0.1:8765")
+        c.add_argument("--data", default="out")
+        c.add_argument("--out", default="out/pieces")
+        c.add_argument("--ffmpeg", default=shutil.which("ffmpeg") or "ffmpeg")
+        c.add_argument("--gpu-less", action="store_true")
     args = p.parse_args(argv)
+    if args.cmd == "clip":
+        cmd_clip(args)
+        return
+    if args.cmd == "cards":
+        cmd_cards(args)
+        return
     if args.cmd == "realism":
         sys.exit(0 if cmd_realism(args)["pass"] else 1)
     cmd_make(args)

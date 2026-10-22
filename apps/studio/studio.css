@@ -66,6 +66,11 @@ body.render .bar, body.render .rail, body.render .transport, body.render .eviden
 body.render .studio { display: block; padding: 0; max-width: none; }
 body.render .screen { position: fixed; inset: 0; border-radius: 0; border: 0; aspect-ratio: auto; box-shadow: none; }
 body.render #cue-evidence, body.render #cue-pending { display: none; }
+/* overlay mode: the caption card alone on a transparent page (captions burned per language) */
+html:has(body.overlay), body.render.overlay, body.render.overlay .studio, body.render.overlay .stage, body.render.overlay .screen { background: transparent !important; }
+body.render.overlay .screen canvas, body.render.overlay .scorebug, body.render.overlay .player-tag, body.render.overlay .goal-strap,
+body.render.overlay .replay-bug, body.render.overlay .film-card, body.render.overlay .wipe { display: none !important; }
+body.render.overlay .cue { animation: none !important; }
 body.render.on-card .scorebug, body.render.on-card .player-tag, body.render.on-card .cue, body.render.on-card .replay-bug { display: none !important; }
 /* vertical films are watched on phones at about 390 points wide: everything reads at arm's length,
    the GOAL strap owns the upper third and the caption the lower third, so they never collide */

@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from matchcut_editing.assembly import mux_command, run
 from playwright.sync_api import Page, sync_playwright
 
 SIZES = {"16x9": (1280, 720), "9x16": (720, 1280)}
@@ -68,6 +69,21 @@ class Studio:
         assert self.page
         self.page.evaluate("([s, i, f]) => window.__render.frame(s, i, f)", [spec, index, fps])
 
+    def caption(self, lang: str, moment: str, out: Path) -> bool:
+        """The verified caption card alone, transparent around it, as a full-frame PNG."""
+        assert self.page
+        shown = self.page.evaluate("(a) => window.__render.caption(a)", {"lang": lang, "moment": moment})
+        if shown:
+            self.page.screenshot(path=str(out), type="png", omit_background=True)
+        return bool(shown)
+
+    def card(self, title: str, sub: str, t: float, out: Path) -> Path:
+        """A title or end card still (its clip is made by holding it)."""
+        assert self.page
+        self.page.evaluate("(a) => window.__render.card(a)", {"title": title, "sub": sub, "t": t})
+        self.page.screenshot(path=str(out), type="png")
+        return out
+
     def probe(self) -> dict[str, Any] | None:
         """Where the drawn ball sits against the striking bone and the controlling player."""
         assert self.page
@@ -93,6 +109,7 @@ class Studio:
         progress: Callable[[int, int, float], None] | None = None,
         first: int = 0,
         warmup: list[dict[str, Any]] | None = None,
+        crf: int = 20,
     ) -> Path:
         """Encode `specs` as frames `first`, `first + 1`, ... of the film. A slice of a film
         (one render-job chunk) first steps through `warmup`, the frames just before it,
@@ -122,7 +139,7 @@ class Studio:
                 "-preset",
                 "slow",
                 "-crf",
-                "20",
+                str(crf),
                 "-maxrate",
                 "4500k",
                 "-bufsize",
@@ -182,26 +199,5 @@ def concat(parts: list[Path], out: Path, ffmpeg: str = "ffmpeg") -> Path:
 
 
 def mux(video: Path, audio: Path, out: Path, ffmpeg: str = "ffmpeg") -> Path:
-    subprocess.run(  # noqa: S603 - our own arguments
-        [
-            ffmpeg,
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-i",
-            str(video),
-            "-i",
-            str(audio),
-            "-c:v",
-            "copy",
-            "-c:a",
-            "copy",
-            "-shortest",
-            "-movflags",
-            "+faststart",
-            str(out),
-        ],
-        check=True,
-    )
+    run(mux_command(video, audio, out, ffmpeg))
     return out
