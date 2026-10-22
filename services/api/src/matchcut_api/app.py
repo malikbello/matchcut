@@ -48,8 +48,10 @@ from matchcut_api.cuts import (
     AzureCuts,
     CutRequest,
     CutStore,
+    Film,
     LocalCuts,
 )
+from matchcut_api.reel import MAX_WINDOW_MS, BlobPieces, LocalPieces, Reel
 
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")  # BCP 47: en, en-NG, pcm, ar, yo
@@ -142,6 +144,64 @@ def _rank(c: Cue, lang: str) -> int:
     return {CueStatus.PLAIN: 0, CueStatus.REJECTED: -1, CueStatus.VERIFIED: 2}[c.status] + (
         c.language == lang
     )
+
+
+class ClipBody(BaseModel):
+    start: int = Field(ge=0, le=20_000_000)  # match ms
+    end: int = Field(ge=0, le=20_000_000)
+    aspect: str = Field(default="9x16", max_length=5)
+
+
+class ShareBody(BaseModel):
+    match: str = Field(max_length=24)
+    aspect: str = Field(default="9x16", max_length=5)
+    key: str = Field(max_length=40)
+    lang: str = Field(default="en", max_length=8)
+
+
+REEL_ASPECT = re.compile(r"^(9x16|16x9)$")
+REEL_KEY = re.compile(r"^(goal|conceded|chance)-\d{1,9}$|^window-\d{1,9}-\d{1,9}$")
+MOMENT_FILE = re.compile(
+    r"^(?P<key>(?:goal|conceded|chance)-\d{1,9}|window-\d{1,9}-\d{1,9})(?:\.(?P<lang>[a-zA-Z-]{2,6}))?\.(?P<ext>mp4|jpg)$"
+)
+
+
+def film_response(film: Film, request: Request, public: bool = False) -> StreamingResponse:
+    """A film with byte ranges, so players can seek."""
+    cache = "public, max-age=86400" if public else "private, max-age=3600"
+    headers = {"Cache-Control": cache, "Accept-Ranges": "bytes"}
+    span = byte_range(request.headers.get("range"), film.size)
+    if span is None:
+        headers["Content-Length"] = str(film.size)
+        return StreamingResponse(film.read(0, film.size - 1), media_type="video/mp4", headers=headers)
+    start, end = span
+    headers["Content-Range"] = f"bytes {start}-{end}/{film.size}"
+    headers["Content-Length"] = str(end - start + 1)
+    return StreamingResponse(film.read(start, end), status_code=206, media_type="video/mp4", headers=headers)
+
+
+def share_page(base: str, token: str, found: tuple[str, str, str, str]) -> str:
+    """A shared clip's page: the film, plus Open Graph and Twitter tags so chats show a player."""
+    _match, aspect, key, _lang = found
+    kind = key.split("-")[0]
+    title = {"goal": "Goal", "conceded": "Goal", "chance": "Big chance"}.get(kind, "Clip")
+    video = f"{base}/s/{token}.mp4"
+    w, h = (720, 1280) if aspect == "9x16" else (1280, 720)
+    desc = "Every fan's cut. Synthetic match, every line verified."
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{title} | Matchcut</title>
+<meta property="og:type" content="video.other"><meta property="og:title" content="{title} | Matchcut">
+<meta property="og:description" content="{desc}"><meta property="og:url" content="{base}/s/{token}">
+<meta property="og:video" content="{video}"><meta property="og:video:secure_url" content="{video}">
+<meta property="og:video:type" content="video/mp4"><meta property="og:video:width" content="{w}">
+<meta property="og:video:height" content="{h}"><meta name="twitter:card" content="player">
+<meta name="twitter:title" content="{title} | Matchcut"><meta name="twitter:player:stream" content="{video}">
+<link rel="stylesheet" href="/share.css"></head>
+<body><main class="share"><div class="mark">MATCH<span>C</span>UT</div>
+<video src="/s/{token}.mp4" controls playsinline autoplay muted loop></video>
+<p>{desc}</p></main></body></html>"""
 
 
 class CutBody(BaseModel):
@@ -349,17 +409,107 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
         film = store.film(cut_id) if store and CUT_ID.match(cut_id) else None
         if film is None:
             raise HTTPException(404, "not found")
-        headers = {"Cache-Control": "private, max-age=3600", "Accept-Ranges": "bytes"}
-        span = byte_range(request.headers.get("range"), film.size)
-        if span is None:
-            headers["Content-Length"] = str(film.size)
-            return StreamingResponse(film.read(0, film.size - 1), media_type="video/mp4", headers=headers)
-        start, end = span
-        headers["Content-Range"] = f"bytes {start}-{end}/{film.size}"
-        headers["Content-Length"] = str(end - start + 1)
-        return StreamingResponse(
-            film.read(start, end), status_code=206, media_type="video/mp4", headers=headers
-        )
+        return film_response(film, request)
+
+    # ---------------------------------------------------------------- the fan's reel
+    reel = Reel(
+        pieces=(
+            BlobPieces(store.blobs, s.cuts_dir / "piece-cache")
+            if isinstance(store, AzureCuts)
+            else LocalPieces(s.pieces_dir)
+        ),
+        data=s.data_dir,
+        crowd=crowd,
+        secret=s.secret.encode(),
+        ffmpeg=shutil.which("ffmpeg") or "ffmpeg",
+    )
+
+    def focus_of(side: str | None, player: str | None, match_id: str) -> dict[str, str]:
+        if (side is None) == (player is None) or (side and side not in ("home", "away")):
+            raise HTTPException(422, "choose a side or a player")
+        if player and player not in players_of(match_id):
+            raise HTTPException(422, "unknown player")
+        return {"side": side} if side else {"player": player or ""}
+
+    @app.get("/api/matches/{match_id}/reel", dependencies=[Depends(require_session)])
+    def match_reel(
+        match_id: str,
+        side: str | None = None,
+        player: str | None = None,
+        lang: str = "en",
+        aspect: str = "9x16",
+        upto: int | None = None,
+    ) -> dict:
+        """The fan's moments up to the live clock, each ready to play and share when rendered."""
+        if not MATCH_ID.match(match_id) or lang not in CUT_LANGUAGES or not REEL_ASPECT.match(aspect):
+            raise HTTPException(422, "invalid request")
+        focus = focus_of(side, player, match_id)
+        return {"moments": reel.moments(match_id, focus, lang, aspect, upto)}
+
+    @app.get("/media/moments/{match_id}/{aspect}/{name}", dependencies=[Depends(require_session)])
+    def moment_media(match_id: str, aspect: str, name: str, request: Request) -> Response:
+        """A moment's poster frame (key.jpg), or its short film with sound (key.lang.mp4)."""
+        m = MOMENT_FILE.match(name)
+        if not (MATCH_ID.match(match_id) and REEL_ASPECT.match(aspect) and m):
+            raise HTTPException(404, "not found")
+        key, lang, ext = m["key"], m["lang"], m["ext"]
+        if ext == "jpg":
+            poster = reel.pieces.path(match_id, aspect, f"{key}.jpg")
+            if poster is None:
+                raise HTTPException(404, "not found")
+            return FileResponse(
+                poster, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"}
+            )
+        if lang not in CUT_LANGUAGES:
+            raise HTTPException(404, "not found")
+        film = reel.moment_film(match_id, aspect, key, lang)
+        if film is None:
+            raise HTTPException(404, "not rendered yet")
+        return film_response(film, request)
+
+    @app.post("/api/matches/{match_id}/clips", dependencies=[Depends(require_session)])
+    def clip_that(match_id: str, body: ClipBody, request: Request) -> dict:
+        """Clip that: any stretch of play (up to 30 s), rendered like a moment, for this fan."""
+        if not MATCH_ID.match(match_id) or not REEL_ASPECT.match(body.aspect):
+            raise HTTPException(422, "invalid request")
+        if not 3_000 <= body.end - body.start <= MAX_WINDOW_MS or body.start < 0:
+            raise HTTPException(422, "a clip is 3 to 30 seconds of play")
+        key = f"window-{body.start}-{body.end}"
+        if reel.pieces.exists(match_id, body.aspect, f"{key}.en.mp4"):
+            return {"key": key, "ready": True}
+        if not limiter.hit(per_hour, f"clips:{client_id(request)}"):
+            raise HTTPException(429, "too many clips for now")
+        request_clip = getattr(store, "request_clip", None)
+        if request_clip is None:
+            raise HTTPException(503, "clips are not switched on here")
+        request_clip(match_id, body.aspect, key)
+        return {"key": key, "ready": False}
+
+    @app.post("/api/share", dependencies=[Depends(require_session)])
+    def share(body: ShareBody) -> dict[str, str]:
+        """A public link to exactly one clip, safe to post anywhere."""
+        if not (MATCH_ID.match(body.match) and REEL_ASPECT.match(body.aspect) and REEL_KEY.match(body.key)):
+            raise HTTPException(422, "invalid request")
+        if body.lang not in CUT_LANGUAGES:
+            raise HTTPException(422, "invalid request")
+        return {"url": f"/s/{reel.share_token(body.match, body.aspect, body.key, body.lang)}"}
+
+    @app.get("/s/{token}.mp4")
+    def shared_film(token: str, request: Request) -> StreamingResponse:
+        found = reel.read_token(token)
+        film = reel.moment_film(*found) if found else None
+        if film is None:
+            raise HTTPException(404, "not found")
+        return film_response(film, request, public=True)
+
+    @app.get("/s/{token}")
+    def shared_page(token: str, request: Request) -> Response:
+        """The page a shared link opens: the clip, and the tags that make chats show it."""
+        found = reel.read_token(token)
+        if found is None:
+            raise HTTPException(404, "not found")
+        base = str(request.base_url).rstrip("/")
+        return Response(share_page(base, token, found), media_type="text/html; charset=utf-8")
 
     @app.get("/media/{match_id}/clip.mp4", dependencies=[Depends(require_session)])
     def media(match_id: str) -> FileResponse:

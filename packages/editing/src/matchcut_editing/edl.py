@@ -239,8 +239,18 @@ def moment_cut(
     package_durations: dict[int, float],
     clip_durations: dict[str, float],
 ) -> Cut:
-    """One moment as its own short film, for the live reel and for sharing a single moment: the
-    moment's clip with its soundtrack (calls, verified line, crowd), no cards."""
+    """One moment (or any stretch of play) as its own short film, for the live reel and for
+    sharing: the clip with its soundtrack (calls, verified line, crowd), no cards."""
+    if key.startswith("window-"):
+        home, away = feed["teams"]["home"], feed["teams"]["away"]
+        cut = Cut(feed["match_id"], language, aspect, key, f"{home['name']} v {away['name']}")
+        cut.segments = window_segments(key)
+        seg = cut.segments[0]
+        cut.windows = [(0.0, seg.duration, seg.t0, seg.t0 + seg.duration * 1000)]
+        cut.crowd_high = [(max(0.0, seg.duration - 4.0), seg.duration)]  # the crowd rises with the move
+        _voice_track(cut, [], cut.windows, cues, calls, clip_durations)
+        cut.captions = _captions(cut, cues)
+        return cut
     kind, t = key.rsplit("-", 1)
     picks = [{"kind": kind, "t": int(t), "who": _scorer(feed, int(t)) if kind != "chance" else None}]
     home, away = feed["teams"]["home"], feed["teams"]["away"]
@@ -330,6 +340,24 @@ def moment_segments(kind: str, t: int, package_durations: dict[int, float]) -> l
         (CONCEDED_BEFORE_S, CONCEDED_AFTER_S) if kind == "conceded" else (CHANCE_BEFORE_S, CHANCE_AFTER_S)
     )
     return [Segment("live", before + after, t0=t - before * 1000, clip=key)]
+
+
+def window_key(t0: int, t1: int) -> str:
+    """A clip of any stretch of play (a fan's "Clip that", a dribble): its key names its span."""
+    return f"window-{int(t0)}-{int(t1)}"
+
+
+def window_segments(key: str) -> list[Segment]:
+    _, t0, t1 = key.split("-")
+    return [Segment("live", (int(t1) - int(t0)) / 1000, t0=int(t0), clip=key)]
+
+
+def segments_for(key: str, package_durations: dict[int, float]) -> list[Segment]:
+    """The segments of any reusable clip, a moment or a window."""
+    if key.startswith("window-"):
+        return window_segments(key)
+    kind, t = key.rsplit("-", 1)
+    return moment_segments(kind, int(t), package_durations)
 
 
 def clip_plan(feed: dict, cues: list[dict], package_durations: dict[int, float]) -> dict[str, list[Segment]]:

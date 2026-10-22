@@ -65,6 +65,43 @@ function keeperKits(feed) {
            away: { primary: ranked[1], secondary: "#111111", shorts: "#111111", socks: ranked[1] } };
 }
 
+const GOAL_HALF = 3.66; // half the goal's width (7.32 m)
+const GOAL_CLEAR = 0.45; // how close a body may come to the goal line inside the goal mouth
+const PASS_DECAY = 0.45; // 1/s: a rolling pass loses about a third of its pace over a second
+const MAX_CONTROLLED_SPEED = 20; // m/s: how fast a ball knocked between players can be drawn moving
+const PASSES = new Set(["pass", "free_kick", "corner", "goal_kick", "kick_off"]);
+
+// Completed passes as flights: start (the ball where it was struck), receiver, departure and
+// arrival times. Arrival is when the tracked ball stops travelling at pass pace near the receiver.
+function buildFlights(feed) {
+  const { t: T, b: B, p: P } = feed;
+  const out = [];
+  for (const e of feed.events ?? []) {
+    if (!PASSES.has(e[1]) || e[4] !== "success" || !(e[9] >= 0)) continue;
+    const [i0] = frameAt(feed, e[0]);
+    if (i0 + 3 >= T.length) continue;
+    const speed = (i) => Math.hypot(B[i + 1][0] - B[i][0], B[i + 1][1] - B[i][1]) / 10 / ((T[i + 1] - T[i]) / 1000);
+    const v0 = Math.max(speed(i0 + 1), 1);
+    let i1 = i0 + 2;
+    for (; i1 < Math.min(T.length - 2, i0 + 45); i1++) {
+      const rx = P[i1][2 * e[9]];
+      const ry = P[i1][2 * e[9] + 1];
+      const near = rx !== EMPTY && Math.hypot(B[i1][0] - rx, B[i1][1] - ry) / 10 < 1.2;
+      if (near || speed(i1) < 0.5 * v0) break;
+    }
+    const [fromX, fromZ] = toWorld(B[i0][0] / 10, B[i0][1] / 10);
+    const [endX, endZ] = toWorld(B[i1][0] / 10, B[i1][1] / 10);
+    const dist = Math.hypot(endX - fromX, endZ - fromZ);
+    if (dist < 4 || T[i1] - e[0] < 150) continue; // a short lay-off is drawn from the data as it is
+    out.push({
+      t0: e[0], t1: T[i1], to: e[9], fromX, fromZ, endX, endZ,
+      dirX: (endX - fromX) / dist, dirZ: (endZ - fromZ) / dist,
+      loft: dist > 25 ? THREE.MathUtils.clamp(dist * 0.09, 1.5, 7) : 0, // long balls are played in the air
+    });
+  }
+  return out.sort((x, y) => x.t0 - y.t0);
+}
+
 // per-slot event index: for any moment, the event whose action window covers it
 function indexEvents(feed) {
   const bySlot = feed.slots.map(() => []);
@@ -288,7 +325,49 @@ export async function createShow({
     return wallDt;
   }
 
+  // Pass flights, re-drawn from the facts the data holds (who passed, when, to whom, when it
+  // arrived) with how a ball really travels: off the foot fast, slowing as it rolls (exponential
+  // decay), lofted on an arc when the pass is long, arriving at the receiver's feet at the moment
+  // the data says it arrived. The tracking stays the truth for analytics; this is how it is drawn.
+  const flights = buildFlights(feed);
+  let flight = null; // the pass in the air at the current time, if any
+  function flightAt(t) {
+    let lo = 0;
+    let hi = flights.length - 1;
+    let hit = null;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (flights[mid].t0 <= t) {
+        hit = flights[mid];
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return hit && t <= hit.t1 ? hit : null;
+  }
+  function placeFlight(f, t) {
+    const dur = (f.t1 - f.t0) / 1000;
+    const tau = THREE.MathUtils.clamp((t - f.t0) / (f.t1 - f.t0), 0, 1);
+    const k = PASS_DECAY * dur;
+    const s = (1 - Math.exp(-k * tau)) / (1 - Math.exp(-k));
+    const end = trackAt(f.to, f.t1);
+    const ex = end ? end.x - f.dirX * 0.35 : f.endX;
+    const ez = end ? end.z - f.dirZ * 0.35 : f.endZ;
+    return [f.fromX + (ex - f.fromX) * s, 0.11 + f.loft * 4 * tau * (1 - tau), f.fromZ + (ez - f.fromZ) * s];
+  }
+
   function placeBall(t) {
+    flight = flightAt(t);
+    if (flight) {
+      const [fx, fy, fz] = placeFlight(flight, t);
+      ball.position.set(fx, fy, fz);
+      const moved = ball.position.distanceTo(ballPrev);
+      if (moved > 0 && moved < 5) {
+        const axis = new THREE.Vector3(fz - ballPrev.z, 0, -(fx - ballPrev.x)).normalize();
+        ball.rotateOnWorldAxis(axis, moved / 0.11);
+      }
+      ballPrev.copy(ball.position);
+      return;
+    }
     const [a, b, u] = frameAt(feed, t);
     const ba = feed.b[a];
     const bb = feed.b[b];
@@ -325,7 +404,14 @@ export async function createShow({
     const x3 = p3[2 * slot] !== EMPTY ? p3[2 * slot] : xb;
     const y3 = p3[2 * slot + 1] !== EMPTY ? p3[2 * slot + 1] : yb;
     const [x, z] = toWorld(spline(x0, xa, xb, x3, u) / 10, spline(y0, ya, yb, y3, u) / 10);
-    return { x, z, vx: splineVel(x0, xa, xb, x3, u, span) / 10, vz: splineVel(y0, ya, yb, y3, u, span) / 10, jump };
+    const vx = splineVel(x0, xa, xb, x3, u, span) / 10;
+    const vz = splineVel(y0, ya, yb, y3, u, span) / 10;
+    // bodies stop at the netting: a player tracked over the line inside the goal mouth (a scorer
+    // running on after a tap-in) is held at the goal line, never drawn through the net
+    if (Math.abs(x) > L / 2 - GOAL_CLEAR && Math.abs(z) < GOAL_HALF + 0.5) {
+      return { x: Math.sign(x) * (L / 2 - GOAL_CLEAR), z, vx: 0, vz, jump };
+    }
+    return { x, z, vx, vz, jump };
   }
 
   // who wears each slot's shirt at time t (substitutions change it)
@@ -373,6 +459,8 @@ export async function createShow({
   let frameNo = 0;
   let carriedOn = -1; // the frame on which the controller last held the ball (motion QA)
   let heldMs = 0;
+  const drawnPrev = new THREE.Vector3();
+  let drawnAt = null; // match time of the last frame the ball was drawn under someone's control
   function attachBall(t) {
     let striker = null;
     for (const pl of players) {
@@ -385,6 +473,11 @@ export async function createShow({
         ball.position.lerp(striker.strikePoint(spot), striker.strike.w);
         return;
       }
+    }
+    if (flight && t > flight.t0 + 80) {
+      controller = null; // a pass on its way belongs to nobody, even rolling past a defender
+      drawnAt = null;
+      return;
     }
     let nearest = null;
     let best = 1.3;
@@ -422,6 +515,16 @@ export async function createShow({
     const carried = THREE.MathUtils.clamp((t - controlledSince) / 500, 0, 1); // ease into a dribble
     const target = owner.speed > 1.4 && !owner.acting ? owner.dribbleSpot(spot, carried) : owner.ballSpot(spot);
     ball.position.lerp(target, w);
+    // a ball under control moves no faster than a ball does: when possession changes (a tackle,
+    // a block) it is knocked across to the new player over a few frames, never teleported
+    const dt = drawnAt === null ? 0 : (t - drawnAt) / 1000;
+    if (dt > 0 && dt < 0.25) {
+      const step = ball.position.distanceTo(drawnPrev);
+      const most = MAX_CONTROLLED_SPEED * dt;
+      if (step > most) ball.position.lerpVectors(drawnPrev, ball.position, most / step);
+    }
+    drawnPrev.copy(ball.position);
+    drawnAt = t;
   }
 
   function finish(wallDt, excitement, focus) {
@@ -546,7 +649,7 @@ export async function createShow({
     },
     // motion QA: where the drawn ball sits against the striking bone and the controlling player
     probe() {
-      const out = { ball: ball.position.toArray(), strike: null, carry: null };
+      const out = { ball: ball.position.toArray(), strike: null, carry: null, flight: flight ? [flight.t0, flight.t1, flight.to] : null };
       const st = players.find((p) => p.root.visible && p.strike && p.strike.w > 0.95);
       if (st) out.strike = { slot: players.indexOf(st), dist: st.strikePoint(new THREE.Vector3()).distanceTo(ball.position) };
       if (controller && carriedOn === frameNo - 1 && controller.root.visible && ball.position.y < 0.6) {

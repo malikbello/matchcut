@@ -330,3 +330,67 @@ def test_a_missing_piece_means_the_film_is_rendered_instead(tmp_path):
     pieces = _pieces(tmp_path, ["title-kestrel-bay-fc.en.mp4", "end.en.mp4"])  # the goal clip is not ready
     store = LocalCuts(tmp_path / "cuts", "http://127.0.0.1:1", "x", pieces, _FakeAssembler())
     assert not store._fast("c-0123456789ab", CutRequest(MATCH, "en", "9x16", side="home"))
+
+
+# ---------------------------------------------------------------- the reel: play, clip, share
+
+
+def _reel_client(settings, tmp_path, store=None):
+    settings.pieces_dir = tmp_path / "pieces"
+    folder = settings.pieces_dir / MATCH / "9x16"
+    folder.mkdir(parents=True)
+    (folder / "goal-3274800.en.share.mp4").write_bytes(b"0123456789")  # a moment film, mixed earlier
+    (folder / "goal-3274800.jpg").write_bytes(b"\xff\xd8poster")
+    return TestClient(create_app(settings, cuts=store))
+
+
+def test_share_links_open_exactly_one_clip_and_refuse_tampering(settings, tmp_path):
+    client = _reel_client(settings, tmp_path)
+    _login(client)
+    r = client.post(
+        "/api/share", json={"match": MATCH, "aspect": "9x16", "key": "goal-3274800", "lang": "en"}
+    )
+    url = r.json()["url"]
+    public = TestClient(client.app)  # a friend with no session
+    page = public.get(url)
+    assert page.status_code == 200
+    assert 'property="og:video"' in page.text
+    assert public.get(f"{url}.mp4").content == b"0123456789"
+    body, sig = url.removeprefix("/s/").split(".")
+    assert public.get(f"/s/{body}.{sig[::-1]}").status_code == 404
+    assert public.get("/s/not-a-token").status_code == 404
+
+
+def test_moment_media_checks_names_and_serves_posters_and_films(settings, tmp_path):
+    client = _reel_client(settings, tmp_path)
+    _login(client)
+    base = f"/media/moments/{MATCH}/9x16"
+    assert client.get(f"{base}/goal-3274800.jpg").content.startswith(b"\xff\xd8")
+    part = client.get(f"{base}/goal-3274800.en.mp4", headers={"Range": "bytes=2-4"})
+    assert part.status_code == 206
+    assert part.content == b"234"
+    for bad in ("..%2Fsecret.mp4", "goal-1.en.mp4.exe", "anything.mp4", "goal-3274800.xx.mp4"):
+        assert client.get(f"{base}/{bad}").status_code == 404
+
+
+def test_clip_that_is_validated_and_needs_a_renderer(settings, tmp_path):
+    client = _reel_client(settings, tmp_path)
+    _login(client)
+    url = f"/api/matches/{MATCH}/clips"
+    assert client.post(url, json={"start": 1000, "end": 60000}).status_code == 422  # longer than 30 s
+    assert client.post(url, json={"start": 1000, "end": 2000}).status_code == 422  # shorter than 3 s
+    assert client.post(url, json={"start": 1000, "end": 16000}).status_code == 503  # no renderer here
+
+
+def test_clip_that_asks_the_renderer_once_per_stretch_of_play(settings, tmp_path):
+    asked = []
+
+    class Renders(FakeCuts):
+        def request_clip(self, match, aspect, key):
+            asked.append((match, aspect, key))
+
+    client = _reel_client(settings, tmp_path, Renders())
+    _login(client)
+    r = client.post(f"/api/matches/{MATCH}/clips", json={"start": 1000, "end": 16000})
+    assert r.json() == {"key": "window-1000-16000", "ready": False}
+    assert asked == [(MATCH, "9x16", "window-1000-16000")]

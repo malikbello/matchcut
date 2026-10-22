@@ -132,8 +132,25 @@ def motion_report(samples: list[dict[str, Any]], fps: int) -> dict[str, Any]:
         "ball_behind_runner_s": round(len(behind) / fps, 2),
         "ball_behind_at_s": [round(i / fps, 2) for i in behind[:20]],
     }
+    # ball jumps: during continuous play the drawn ball never moves faster than a ball can (a snap
+    # to a foot, a teleport between two tracked positions); 1.4 m a frame at 25 fps is 35 m/s.
+    # The second after a shot is exempt: a struck shot legitimately flies that fast.
+    jumps = []
+    for i in range(1, len(samples)):
+        a_, b_ = samples[i - 1], samples[i]
+        if not (a_ and b_ and a_.get("kind") == b_.get("kind") == "live") or b_.get("shot"):
+            continue
+        if abs((b_["t"] or 0) - (a_["t"] or 0) - 1000 / fps) > 1:
+            continue  # a cut to other play
+        step = sum((x - y) ** 2 for x, y in zip(a_["ball"], b_["ball"], strict=True)) ** 0.5
+        if step > 1.4 * 25 / fps:
+            jumps.append(round(i / fps, 2))
+    report["ball_jumps"] = len(jumps)
+    report["ball_jump_at_s"] = jumps[:20]
     report["pass"] = bool(
-        (not gaps or (q(gaps, 0.95) or 0) <= 0.2) and len(behind) <= max(1, len(runs) // 100)
+        (not gaps or (q(gaps, 0.95) or 0) <= 0.2)
+        and len(behind) <= max(1, len(runs) // 100)
+        and len(jumps) <= 2
     )
     return report
 
@@ -155,9 +172,13 @@ def cmd_realism(a: argparse.Namespace) -> dict[str, Any]:
         assert studio.page
         studio.page.evaluate("() => window.__render.paint(false)")  # measure motion, draw nothing
         samples = []
+        shots = [e[0] for e in feed.get("events", []) if e[1] == "shot"]
         for i, spec in enumerate(specs):
             studio.step(spec, i, a.fps)
-            samples.append(studio.probe() if spec["kind"] != "card" else None)
+            probe = studio.probe() if spec["kind"] != "card" else None
+            t = spec.get("t")
+            shot = t is not None and any(0 <= t - s_ <= 1200 for s_ in shots)  # a struck shot flies fast
+            samples.append({**probe, "t": t, "kind": spec["kind"], "shot": shot} if probe else None)
     report = motion_report(samples, a.fps)
     print(json.dumps(report, indent=1))
     return report
@@ -211,7 +232,7 @@ def write_manifest(folder: Path, packages: dict[int, float], plan: dict[str, lis
 
 def cmd_clip(a: argparse.Namespace) -> list[Path]:
     """Render moment clips (all slices on this machine) and caption them in every language."""
-    from matchcut_editing.edl import clip_plan  # noqa: PLC0415
+    from matchcut_editing.edl import clip_plan, segments_for  # noqa: PLC0415
     from matchcut_editing.inputs import VOICED  # noqa: PLC0415
 
     from matchcut_recap.clips import finish_clip, render_clip_part  # noqa: PLC0415
@@ -228,8 +249,9 @@ def cmd_clip(a: argparse.Namespace) -> list[Path]:
         write_manifest(folder, packages, plan, a.fps)
         keys = a.keys.split(",") if a.keys else list(plan)
         for key in keys:
-            part = render_clip_part(studio, plan[key], a.fps, 0, 1, folder / f"{key}.part00.mp4")
-            pieces = finish_clip(studio, key, plan[key], [part], data, a.match, langs, folder, a.ffmpeg)
+            segs = plan.get(key) or segments_for(key, packages)  # a moment, or a window of play
+            part = render_clip_part(studio, segs, a.fps, 0, 1, folder / f"{key}.part00.mp4")
+            pieces = finish_clip(studio, key, segs, [part], data, a.match, langs, folder, a.ffmpeg)
             made += list(pieces.values())
             print(f"clip {key}: {', '.join(sorted(pieces))}", flush=True)
     return made

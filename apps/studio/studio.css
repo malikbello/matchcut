@@ -241,6 +241,30 @@ body.render.aspect-9x16 .film-card .fc-sub { font-size: 26px; max-width: 90%; }
 .ghost:hover { border-color: var(--chalk); }
 .cut-panel .error { margin: 0; }
 
+/* the reel: the fan's moments as they happen */
+.reel-head { display: flex; align-items: center; justify-content: space-between; margin-top: 4px; }
+.reel-head h3 { margin: 0; font: 800 13px/1 var(--ui); letter-spacing: 0.12em; text-transform: uppercase; color: var(--mist); }
+.clip-that { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--signal); background: rgba(255, 74, 46, 0.12); color: var(--chalk); border-radius: 999px; padding: 7px 14px; font: 800 13px var(--ui); cursor: pointer; }
+.clip-that .rec { width: 9px; height: 9px; border-radius: 50%; background: var(--signal); animation: pulse 1.2s infinite; }
+.clip-that[disabled] { opacity: 0.5; cursor: progress; }
+.reel-empty { margin: 0; }
+.reel-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.reel-item { display: grid; grid-template-columns: 74px 1fr; gap: 12px; padding: 8px; border-radius: 12px; background: var(--ink-800); border: 1px solid var(--ink-700); animation: cutIn var(--cut-in) both; }
+.reel-item .poster { width: 74px; height: 104px; border-radius: 8px; object-fit: cover; background: var(--turf-900); }
+.reel-item .poster.pending { display: grid; place-items: center; color: var(--mist); font: 700 10px var(--ui); text-align: center; padding: 6px; }
+.reel-item .body { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.reel-item .badge { display: inline-flex; gap: 6px; align-items: center; font: 800 11px var(--ui); letter-spacing: 0.1em; text-transform: uppercase; color: var(--mist); }
+.reel-item .badge .k { color: var(--ink-950); background: var(--signal); padding: 2px 6px; border-radius: 4px; }
+.reel-item.chance .badge .k, .reel-item.clip .badge .k { background: var(--data); }
+.reel-item.conceded .badge .k { background: var(--mist); }
+.reel-item .line { margin: 0; font: 700 14px/1.3 var(--ui); }
+.reel-item .acts { display: flex; gap: 8px; }
+.reel-item .acts button { flex: 1; padding: 7px 8px; }
+.moment-player { border: 1px solid var(--ink-700); border-radius: var(--r-panel); background: var(--ink-900); color: var(--chalk); padding: 14px; width: min(420px, 94vw); }
+.moment-player::backdrop { background: rgba(7, 9, 13, 0.82); }
+.moment-player video { width: 100%; max-height: 70vh; border-radius: 10px; background: #000; }
+.moment-text { font: 700 15px/1.35 var(--ui); margin: 10px 0; }
+
 /* Arabic: its own typeface, and the card reads right to left (the pitch never mirrors) */
 :lang(ar) { font-family: 'IBM Plex Sans Arabic', var(--ui); }
 .cue-text:lang(ar) { font: 700 clamp(18px, 2vw, 26px)/1.5 'IBM Plex Sans Arabic', var(--ui); letter-spacing: 0; }

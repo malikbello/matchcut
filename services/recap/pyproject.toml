@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 matchcut-recap = "matchcut_recap.cli:main"
 matchcut-recap-job = "matchcut_recap.job:main"
+matchcut-journey = "matchcut_recap.journey:main"
 
 [build-system]
 requires = ["hatchling>=1.25"]

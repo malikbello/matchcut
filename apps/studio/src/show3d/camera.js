@@ -4,7 +4,7 @@
 //   goal       low behind the goal the ball is attacking, for chances and replays
 // Moves are critically damped springs, so pans ease in and out like a camera operator.
 // Shots are framed as operators frame them, in metres of play across the picture, not in lens
-// angle: the main camera shows about 46 m on a widescreen feed and about 20 m on a vertical one,
+// angle: the main camera shows about 46 m on a widescreen feed and about 14 m on a vertical one,
 // tightening near the boxes, and leads the play in the direction the ball is travelling.
 import * as THREE from "three";
 import { L, W } from "./pitch.js";
@@ -86,7 +86,9 @@ export class Director {
       // the picture is sized in metres of play, so a vertical feed keeps players readable
       pos = new THREE.Vector3(bx * 0.55, 21, W / 2 + 19);
       look = new THREE.Vector3(bx + this.lead.x, 0, (vertical ? bz * 0.85 : bz * 0.55 - 2) + this.lead.z);
-      const metres = vertical ? THREE.MathUtils.lerp(22, 17, nearBox) : THREE.MathUtils.lerp(46, 34, nearBox);
+      // a vertical feed is a crop of the main camera: about 14 m of play across (11 m near the
+      // boxes), so players stay as large on a phone as they are on television
+      const metres = vertical ? THREE.MathUtils.lerp(14, 11, nearBox) : THREE.MathUtils.lerp(46, 34, nearBox);
       fov = this.fovFor(metres, pos.distanceTo(look));
     }
     this.pos.x = spring(this.pos.x, pos.x, 2.2, dt);

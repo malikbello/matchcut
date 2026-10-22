@@ -724,9 +724,145 @@ async function shareCut() {
     await navigator.share({ files: [file], title: "My Matchcut" });
   } catch { /* the fan closed the share sheet */ }
 }
+// ------------------------------------------------------------ the reel
+// The fan's moments as the match happens: each one rendered once for every fan, captioned in
+// the fan's language, played with its own sound, shared as the film itself (the phone's share
+// sheet: WhatsApp, TikTok, Instagram, X) or as a public link that opens just that clip.
+const REEL_KIND = { goal: "Goal", conceded: "Goal against", chance: "Big chance", window: "Your clip" };
+const reel = { items: new Map(), clips: [], timer: 0, open: null };
+const reelLang = () => $("cut-lang").value || "en";
+const focusQuery = () =>
+  cut.focus === "player" ? `player=${encodeURIComponent($("cut-player").value)}` : `side=${cut.side}`;
+const momentUrl = (key, lang) =>
+  `/media/moments/${encodeURIComponent(state.match.match_id)}/${cut.aspect}/${key}${lang ? `.${lang}.mp4` : ".jpg"}`;
+
+async function refreshReel() {
+  clearTimeout(reel.timer);
+  reel.timer = setTimeout(refreshReel, 4000);
+  if (!state.match || RENDER || $("cut").hidden) return;
+  const q = `${focusQuery()}&lang=${encodeURIComponent(reelLang())}&aspect=${cut.aspect}&upto=${Math.round(state.t)}`;
+  let data;
+  try { data = await api(`/api/matches/${encodeURIComponent(state.match.match_id)}/reel?${q}`); } catch { return; }
+  const items = [...data.moments, ...reel.clips.filter((c) => c.t <= state.t + 60000)];
+  items.sort((x, y) => y.t - x.t);
+  const keep = new Set(items.map((m) => m.key));
+  for (const [key, li] of reel.items) if (!keep.has(key)) { li.remove(); reel.items.delete(key); }
+  items.forEach((m, i) => {
+    const sig = `${m.key}:${m.ready}:${reelLang()}:${cut.aspect}`;
+    let li = reel.items.get(m.key);
+    if (!li || li.dataset.sig !== sig) {
+      const fresh = reelItem(m);
+      fresh.dataset.sig = sig;
+      if (li) li.replaceWith(fresh);
+      li = fresh;
+      reel.items.set(m.key, li);
+    }
+    if ($("reel-list").children[i] !== li) $("reel-list").insertBefore(li, $("reel-list").children[i] || null);
+  });
+  $("reel-empty").hidden = items.length > 0;
+}
+
+function reelItem(m) {
+  const kind = m.key.split("-")[0];
+  const li = el("li", { class: `reel-item ${kind === "window" ? "clip" : kind}` });
+  const poster = m.ready
+    ? el("img", { class: "poster", src: momentUrl(m.key), alt: "", loading: "lazy" })
+    : el("div", { class: "poster pending" }, "Rendering for every fan");
+  const body = el("div", { class: "body" });
+  const badge = el("div", { class: "badge" });
+  badge.append(el("span", { class: "k" }, REEL_KIND[kind] || "Moment"), el("span", {}, m.clock || ""));
+  body.append(badge, el("p", { class: "line", lang: reelLang() }, isolateNumbers(m.text || (kind === "window" ? "The play you clipped" : ""), reelLang())));
+  if (m.ready) {
+    const acts = el("div", { class: "acts" });
+    const play = el("button", { type: "button", class: "ghost" }, "Play");
+    const share = el("button", { type: "button", class: "ghost" }, "Share");
+    play.addEventListener("click", () => openMoment(m));
+    share.addEventListener("click", () => shareMoment(m));
+    acts.append(play, share);
+    body.append(acts);
+  }
+  li.append(poster, body);
+  return li;
+}
+
+function openMoment(m) {
+  reel.open = m;
+  const src = momentUrl(m.key, reelLang());
+  $("moment-video").src = src;
+  $("moment-download").href = src;
+  $("moment-download").setAttribute("download", `matchcut-${m.key}.mp4`);
+  $("moment-text").textContent = m.text || "";
+  $("moment-note").textContent = "";
+  $("moment-player").showModal();
+  $("moment-video").play().catch(() => {});
+}
+
+async function shareMoment(m) {
+  const lang = reelLang();
+  const title = `${REEL_KIND[m.key.split("-")[0]] || "Clip"} | Matchcut`;
+  const text = m.text || "Every fan's cut.";
+  // on phones: the film itself goes to the share sheet (WhatsApp status, TikTok, Instagram, X)
+  try {
+    if (navigator.canShare) {
+      const blob = await (await fetch(momentUrl(m.key, lang), { credentials: "same-origin" })).blob();
+      const file = new File([blob], `matchcut-${m.key}.mp4`, { type: "video/mp4" });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title, text });
+        return;
+      }
+    }
+  } catch { /* the fan closed the sheet, or the browser cannot share files: offer the link */ }
+  // elsewhere: a public link that opens just this clip, with a preview card in chats
+  const r = await fetch("/api/share", {
+    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ match: state.match.match_id, aspect: cut.aspect, key: m.key, lang }),
+  });
+  if (!r.ok) return;
+  const url = new URL((await r.json()).url, location.origin).href;
+  try { await navigator.clipboard.writeText(url); } catch { /* clipboard blocked: the link is shown */ }
+  const note = $("moment-player").open ? $("moment-note") : $("reel-empty");
+  note.hidden = false;
+  note.textContent = `Link copied: ${url}`;
+}
+
+async function clipThat() {
+  if (!state.match) return;
+  const end = Math.round(state.t);
+  const start = Math.max(0, end - 15000);
+  $("clip-that").disabled = true;
+  try {
+    const r = await fetch(`/api/matches/${encodeURIComponent(state.match.match_id)}/clips`, {
+      method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ start, end, aspect: cut.aspect }),
+    });
+    if (r.ok) {
+      const { key, ready } = await r.json();
+      reel.clips.push({ key, t: end, clock: clock(end), text: "The play you clipped", ready });
+      pollClip(key);
+    }
+  } finally {
+    setTimeout(() => { $("clip-that").disabled = false; }, 2500);
+  }
+  refreshReel();
+}
+
+async function pollClip(key) {
+  const c = reel.clips.find((x) => x.key === key);
+  if (!c || c.ready) return;
+  const r = await fetch(momentUrl(key), { credentials: "same-origin", cache: "no-store" }).catch(() => null);
+  if (r?.ok) { c.ready = true; refreshReel(); return; }
+  setTimeout(() => pollClip(key), 6000);
+}
+
 function wireCutPanel() {
   if (cut.wired) return;
   cut.wired = true;
+  $("clip-that").addEventListener("click", clipThat);
+  $("moment-close").addEventListener("click", () => { $("moment-video").pause(); $("moment-player").close(); });
+  $("moment-share").addEventListener("click", () => reel.open && shareMoment(reel.open));
+  for (const id of ["cut-lang", "cut-player"]) $(id).addEventListener("change", refreshReel);
+  $("cut").addEventListener("click", (e) => { if (e.target.closest("[data-focus],[data-aspect],.club")) setTimeout(refreshReel, 0); });
+  refreshReel();
   $("cut").addEventListener("submit", makeCut);
   for (const b of $("cut").querySelectorAll("[data-focus]")) {
     b.addEventListener("click", () => {
@@ -753,6 +889,7 @@ async function start() {
   state.list = list;
   if (list.length) await loadMatch(list[0]);
   wireCutPanel();
+  if (location.hostname === "127.0.0.1") window.__studio = { seek }; // local journeys and QA only
 }
 
 document.addEventListener("DOMContentLoaded", () => {

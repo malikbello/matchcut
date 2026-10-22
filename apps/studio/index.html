@@ -139,8 +139,8 @@
     <aside class="rail" aria-label="Moments">
       <form id="cut" class="cut-panel" autocomplete="off" hidden>
         <div class="cut-head">
-          <h2>Your cut</h2>
-          <p class="muted small">Your club or your player, in your language, voiced, captioned and ready to share.</p>
+          <h2>Your reel</h2>
+          <p class="muted small">Follow your club or your player. Every moment that matters to you lands here as a clip, voiced and captioned in your language, ready to share.</p>
         </div>
         <div class="seg" role="radiogroup" aria-label="Whose story">
           <button type="button" role="radio" aria-checked="true" data-focus="side">Club</button>
@@ -155,7 +155,14 @@
             <button type="button" role="radio" aria-checked="false" data-aspect="16x9"><span class="ar landscape" aria-hidden="true"></span>Wide</button>
           </div>
         </div>
-        <button type="submit" class="primary" id="cut-go">Make my cut</button>
+        <div class="reel-head">
+          <h3>Live</h3>
+          <button type="button" class="clip-that" id="clip-that" title="Clip the last 15 seconds of play"><span class="rec" aria-hidden="true"></span>Clip that</button>
+        </div>
+        <p class="muted small reel-empty" id="reel-empty">Your moments land here as they happen.</p>
+        <ol id="reel-list" class="reel-list" aria-live="polite"></ol>
+        <div class="reel-head"><h3>Full time</h3></div>
+        <button type="submit" class="primary" id="cut-go">Your match in 60 seconds</button>
         <div id="cut-progress" class="cut-progress" role="status" aria-live="polite" hidden>
           <div class="cut-meter"><span></span></div>
           <p><strong id="cut-state">Queued</strong> <span class="muted small" id="cut-hint"></span></p>
@@ -170,6 +177,16 @@
         </div>
         <p id="cut-error" class="error small" role="alert" hidden></p>
       </form>
+      <dialog id="moment-player" class="moment-player" aria-label="Your clip">
+        <video id="moment-video" controls playsinline preload="metadata"></video>
+        <p class="moment-text" id="moment-text"></p>
+        <div class="cut-actions">
+          <button type="button" class="primary" id="moment-share">Share</button>
+          <a class="ghost" id="moment-download" download>Download</a>
+          <button type="button" class="ghost" id="moment-close">Close</button>
+        </div>
+        <p class="muted small" id="moment-note" role="status"></p>
+      </dialog>
       <div class="rail-head"><h2>Moments</h2><span class="muted small" id="rail-count"></span></div>
       <ol id="timeline" class="timeline"></ol>
     </aside>
