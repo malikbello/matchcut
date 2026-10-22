@@ -16,14 +16,19 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import re
 import tempfile
+import threading
 from collections.abc import Iterator
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Protocol
 
 from matchcut_api.cuts import Film, file_film
+
+log = logging.getLogger(__name__)
 
 KEY = re.compile(r"^(goal|conceded|chance)-\d{1,9}$|^window-\d{1,9}-\d{1,9}$")
 ASPECT = re.compile(r"^(9x16|16x9)$")
@@ -112,6 +117,22 @@ class BlobPieces:
         return json.loads(p.read_text(encoding="utf-8")) if p else None
 
 
+# the caption kinds that tell each kind of moment (a goal against is still told as a goal)
+CAPTION_KINDS = {"goal": {"goal"}, "conceded": {"goal"}, "chance": {"big_chance", "great_save"}}
+
+
+def moment_caption(cues: list[dict], kind: str, t: int) -> dict | None:
+    """The caption a moment's card shows: of the captions within 1.5 s (a goal can share its
+    second with a momentum line), the one about this kind of moment, verified first, nearest."""
+    near = [c for c in cues if abs(c["t_ms"] - t) <= 1500]
+    wanted = CAPTION_KINDS.get(kind, set())
+    return min(
+        near,
+        key=lambda c: (c.get("kind") not in wanted, c.get("status") != "verified", abs(c["t_ms"] - t)),
+        default=None,
+    )
+
+
 @dataclass
 class Reel:
     pieces: PieceStore
@@ -119,22 +140,52 @@ class Reel:
     crowd: Path
     secret: bytes
     ffmpeg: str = "ffmpeg"
+    # one mix per film at a time (a tap during a warm-up waits for it), and warm-ups one by one
+    _locks: dict[str, threading.Lock] = field(default_factory=dict, repr=False)
+    _guard: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _warming: set[str] = field(default_factory=set, repr=False)
+    _warmer: ThreadPoolExecutor = field(
+        default_factory=lambda: ThreadPoolExecutor(max_workers=1, thread_name_prefix="reel-warm"), repr=False
+    )
+
+    def _lock(self, name: str) -> threading.Lock:
+        with self._guard:
+            return self._locks.setdefault(name, threading.Lock())
+
+    def warm(self, match: str, aspect: str, key: str, lang: str) -> None:
+        """Mix a ready moment's film in the background as soon as the reel lists it, so it plays
+        the moment the fan taps it (mixing takes seconds; nobody should watch a spinner)."""
+        name = f"{match}/{aspect}/{key}.{lang}"
+        with self._guard:
+            if name in self._warming:
+                return
+            self._warming.add(name)
+        self._warmer.submit(self._warm, name, match, aspect, key, lang)
+
+    def _warm(self, name: str, match: str, aspect: str, key: str, lang: str) -> None:
+        try:
+            self.moment_film(match, aspect, key, lang)
+        except Exception:  # a failed warm-up is not an error: the fan's own tap mixes it again
+            log.warning("could not mix %s ahead of play", name, exc_info=True)
+            with self._guard:
+                self._warming.discard(name)
 
     def moments(
         self, match: str, focus: dict[str, str], lang: str, aspect: str, upto: int | None
     ) -> list[dict]:
         """The fan's moments so far: a goal for them, a goal against (their club), their chances."""
         from matchcut_editing.edl import pick_moments  # noqa: PLC0415
-        from matchcut_editing.inputs import load  # noqa: PLC0415
+        from matchcut_editing.inputs import best_cues, read_feed  # noqa: PLC0415
 
-        inp = load(self.data, match, lang)
-        cue_at = {c["t_ms"]: c for c in inp.cues}
+        # every fan's reel polls this: the feed and captions only (no voices are needed to list)
+        feed = read_feed(self.data, match)
+        cues = best_cues(self.data / "insights" / f"{match}.jsonl", lang)
         out = []
-        for p in pick_moments(inp.feed, inp.cues, focus):
+        for p in pick_moments(feed, cues, focus):
             if upto is not None and p["t"] > upto:
                 break
             key = f"{p['kind']}-{p['t']}"
-            cue = next((c for t, c in cue_at.items() if abs(t - p["t"]) <= 1500), None)
+            cue = moment_caption(cues, p["kind"], p["t"])
             out.append(
                 {
                     "key": key,
@@ -150,29 +201,31 @@ class Reel:
         return out
 
     def moment_film(self, match: str, aspect: str, key: str, lang: str) -> Film | None:
-        """A moment as a short film with its soundtrack; mixed on first play, then cached."""
+        """A moment as a short film with its soundtrack; mixed once (ahead of play, or on first
+        play), then cached."""
         name = f"{key}.{lang}.share.mp4"
-        film = self.pieces.film(match, aspect, name)
-        if film:
-            return film
-        clip = self.pieces.path(match, aspect, f"{key}.{lang}.mp4")
-        manifest = self.pieces.manifest(match, aspect)
-        if clip is None or manifest is None:
-            return None
-        from matchcut_editing.assembly import assemble_cut  # noqa: PLC0415
-        from matchcut_editing.edl import moment_cut  # noqa: PLC0415
-        from matchcut_editing.inputs import load  # noqa: PLC0415
+        with self._lock(f"{match}/{aspect}/{name}"):
+            film = self.pieces.film(match, aspect, name)
+            if film:
+                return film
+            clip = self.pieces.path(match, aspect, f"{key}.{lang}.mp4")
+            manifest = self.pieces.manifest(match, aspect)
+            if clip is None or manifest is None:
+                return None
+            from matchcut_editing.assembly import assemble_cut  # noqa: PLC0415
+            from matchcut_editing.edl import moment_cut  # noqa: PLC0415
+            from matchcut_editing.inputs import load  # noqa: PLC0415
 
-        inp = load(self.data, match, lang)
-        packages = {int(t): d for t, d in manifest["packages"].items()}
-        cut = moment_cut(
-            inp.feed, inp.cues, inp.calls, key, language=lang, aspect=aspect,
-            package_durations=packages, clip_durations=inp.durations,
-        )  # fmt: skip
-        with tempfile.TemporaryDirectory() as tmp:
-            made = assemble_cut(cut, [clip], self.data / "media", self.crowd, Path(tmp), self.ffmpeg)
-            self.pieces.put(match, aspect, name, made)
-        return self.pieces.film(match, aspect, name)
+            inp = load(self.data, match, lang)
+            packages = {int(t): d for t, d in manifest["packages"].items()}
+            cut = moment_cut(
+                inp.feed, inp.cues, inp.calls, key, language=lang, aspect=aspect,
+                package_durations=packages, clip_durations=inp.durations,
+            )  # fmt: skip
+            with tempfile.TemporaryDirectory() as tmp:
+                made = assemble_cut(cut, [clip], self.data / "media", self.crowd, Path(tmp), self.ffmpeg)
+                self.pieces.put(match, aspect, name, made)
+            return self.pieces.film(match, aspect, name)
 
     # ---------------------------------------------------------------- public share links
     def share_token(self, match: str, aspect: str, key: str, lang: str) -> str:

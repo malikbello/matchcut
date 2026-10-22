@@ -916,7 +916,9 @@ async function start() {
   $("gate").hidden = true; $("studio").hidden = false;
   resize();
   const list = await api("/api/matches");
-  $("match").replaceChildren(...list.map((m) => el("option", { value: m.match_id }, m.match_id.toUpperCase())));
+  // match ids carry the clubs' codes (kes-wcr-7): fans read "KES v WCR"
+  const fixture = (id) => { const [h, a] = id.split("-"); return `${h.toUpperCase()} v ${a.toUpperCase()}`; };
+  $("match").replaceChildren(...list.map((m) => el("option", { value: m.match_id }, fixture(m.match_id))));
   state.list = list;
   if (list.length) await loadMatch(list[0]);
   wireCutPanel();

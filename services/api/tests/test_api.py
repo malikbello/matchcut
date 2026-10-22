@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from matchcut_api import Settings, create_app
 from matchcut_api.app import qr_svg, sha256
 from matchcut_api.cuts import CutRequest, Film, LocalCuts, progress
+from matchcut_api.reel import LocalPieces, Reel, moment_caption
 from matchcut_contracts import Cue, CueStatus, MomentKind
 
 CODE = "kickoff-2026"
@@ -391,6 +392,36 @@ def test_shared_links_preview_in_chats_and_hand_over_to_a_phone_by_qr(settings, 
     forged = url[:-1] + ("A" if url[-1] != "A" else "B")
     assert public.get(f"{forged}/qr.svg").status_code == 404
     assert public.get(f"{forged}.jpg").status_code == 404
+
+
+def test_a_goal_card_tells_the_goal_not_the_momentum_line_beside_it():
+    cues = [
+        {"t_ms": 3_274_800, "kind": "momentum", "status": "plain", "text": "Momentum swings"},
+        {"t_ms": 3_274_800, "kind": "goal", "status": "verified", "text": "Quinouani scores"},
+        {"t_ms": 3_400_000, "kind": "goal", "status": "verified", "text": "too late"},
+    ]
+    goal, conceded = moment_caption(cues, "goal", 3_274_800), moment_caption(cues, "conceded", 3_274_800)
+    assert goal is not None
+    assert goal["text"] == "Quinouani scores"  # the same second as a momentum line: the goal wins
+    assert conceded is not None
+    assert conceded["text"] == "Quinouani scores"
+    assert moment_caption(cues, "chance", 1_000) is None
+
+
+def test_ready_moments_are_mixed_ahead_of_play_once(tmp_path):
+    mixed: list[tuple[str, str, str, str]] = []
+
+    class CountingReel(Reel):
+        def moment_film(self, match: str, aspect: str, key: str, lang: str) -> Film | None:
+            mixed.append((match, aspect, key, lang))
+            time.sleep(0.05)  # mixing takes a while: the reel polls again meanwhile
+            return None
+
+    reel = CountingReel(LocalPieces(tmp_path), tmp_path, tmp_path, b"key")
+    for _ in range(3):
+        reel.warm(MATCH, "9x16", "goal-3274800", "en")
+    reel._warmer.shutdown(wait=True)
+    assert mixed == [(MATCH, "9x16", "goal-3274800", "en")]
 
 
 def test_moment_media_checks_names_and_serves_posters_and_films(settings, tmp_path):

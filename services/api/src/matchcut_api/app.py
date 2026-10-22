@@ -479,7 +479,11 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
         if not MATCH_ID.match(match_id) or lang not in CUT_LANGUAGES or not REEL_ASPECT.match(aspect):
             raise HTTPException(422, "invalid request")
         focus = focus_of(side, player, match_id)
-        return {"moments": reel.moments(match_id, focus, lang, aspect, upto)}
+        moments = reel.moments(match_id, focus, lang, aspect, upto)
+        for m in moments:
+            if m["ready"]:
+                reel.warm(match_id, aspect, m["key"], lang)  # mixed before the fan taps Play
+        return {"moments": moments}
 
     @app.get("/media/moments/{match_id}/{aspect}/{name}", dependencies=[Depends(require_session)])
     def moment_media(match_id: str, aspect: str, name: str, request: Request) -> Response:
