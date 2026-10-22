@@ -15,7 +15,17 @@
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
-## Resume here (handoff, 21 Oct)
+## Resume here (handoff, 22 Oct): Malik's review, waiting for him
+Malik reviewed out/review/quinouani-goal-en-9x16.mp4 (Rocketbox players, ball truth, fast assembly) and did not accept it yet. He said do nothing until he is back. Open points, in his words and order:
+1. Players' hands point to the back (arm pose: check the Rocketbox Biped arm retarget, clip by clip).
+2. Players run into and through the goal net (keep bodies out of the goal frame and net).
+3. Passes are not sleek, not like real football (ball flight, pace and the kicking motion).
+4. Check every example film frame by frame before presenting it.
+5. Make another proper clip: a player scoring a free kick, or a proper dribble.
+6. He still cannot see how real users would use this in real life: the fan's journey (live, reel, clip, post) must be shown working, not described.
+State: local commits a239875 (realism) and 3114ff5 (moments rendered once, cuts assembled in about 10 s) are pushed on d5/fan-cuts; Azure still runs 049af0a (the image build for a239875 stalled when the laptop slept and was stopped). Not started: Studio reel and Clip that, phone view and sharing, history lines, QA agent, Recap Factory, Azure release of the new pipeline.
+
+## Handoff (21 Oct)
 - **Branch `d5/fan-cuts`** (pushed, no PR yet: GitHub Actions is blocked for this account until the monthly minutes reset, so CI runs locally: format, lint, pyright, tests at 87%, Bicep build). Merge only after the local suite is green.
 - **First fan film made and checked** (Kestrel Bay, English, 9:16, 80.7 s): -16.4 LUFS. Fixed after review: the Studio clock now follows the engine's rule (it showed raw timeline minutes, 2 min ahead of the verified captions); vertical layout for phones; cards lead with the fan's club or player, in their language; encode capped (92 MB to 41 MB, SSIM 0.97); no overlays on cards.
 - **Render speed, measured in the container on CPU:** High 3.8 s a frame (ambient occlusion 2.1 s of it), film tier 1.8 s, invisible difference at film size. The quality governor no longer steps down during films (it was changing quality mid-cut).
