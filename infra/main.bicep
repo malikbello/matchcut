@@ -243,6 +243,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = if (deployApps) {
             { name: 'MATCHCUT_ACCESS_CODE_SHA256', secretRef: 'access-code-sha256' }
             { name: 'MATCHCUT_SESSION_SECRET', secretRef: 'session-secret' }
             { name: 'MATCHCUT_CUT_CHUNKS', value: '10' }
+            { name: 'MATCHCUT_PROXY_HOPS', value: '1' } // the ingress: rate limits key on the caller it reports
           ])
           probes: [
             { type: 'Liveness', httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 30 }

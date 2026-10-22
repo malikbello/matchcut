@@ -3,7 +3,8 @@
     matchcut-recap journey --base http://127.0.0.1:8765 --out out/journey
 
 Sign in, follow Kestrel Bay, watch the match reach a goal, see it land in the reel, play it,
-share it (the public link a friend opens without the access code), and clip a stretch of play.
+share it (the public link a friend opens without the access code), and clip a stretch of play;
+then the same goal on a laptop, handed over to the phone by QR code.
 It is both the demonstration of how a fan uses Matchcut and an end-to-end test: every step
 asserts what a fan would see. The fan's session is also recorded (journey.webm).
 """
@@ -20,12 +21,29 @@ from playwright.sync_api import Page, ViewportSize, expect, sync_playwright
 PHONE: ViewportSize = {"width": 390, "height": 844}
 
 
+LAPTOP: ViewportSize = {"width": 1440, "height": 900}
+
+
 def shot(page: Page, out: Path, name: str) -> None:
     page.screenshot(path=str(out / f"{name}.png"))
     print(f"  {name}", flush=True)
 
 
-def run(base: str, code: str, out: Path, seek_ms: int = 3_290_000) -> None:
+def sign_in(page: Page, base: str, code: str) -> None:
+    page.goto(base)
+    page.fill("#code", code)
+    page.click("#gate-form button[type=submit]")
+    expect(page.locator("#studio")).to_be_visible(timeout=60_000)
+
+
+def seek(page: Page, seek_ms: int) -> None:
+    """Jump the replayed match to seek_ms, with the fan's reel in view and a goal in it."""
+    page.evaluate("(t) => window.__studio?.seek ? window.__studio.seek(t) : null", seek_ms)
+    page.locator("#cut").scroll_into_view_if_needed()
+    expect(page.locator("#reel-list .reel-item.goal").first).to_be_visible(timeout=60_000)
+
+
+def run(base: str, code: str, out: Path, seek_ms: int = 4_545_000) -> None:
     out.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -34,17 +52,12 @@ def run(base: str, code: str, out: Path, seek_ms: int = 3_290_000) -> None:
             record_video_dir=str(out), record_video_size=PHONE,
         )  # fmt: skip
         page = ctx.new_page()
-        page.goto(base)
-        page.fill("#code", code)
-        page.click("#gate-form button[type=submit]")
-        expect(page.locator("#studio")).to_be_visible(timeout=60_000)
+        sign_in(page, base, code)
         shot(page, out, "01-live-match")
 
         # follow Kestrel Bay, in English, on the phone format (the defaults), and jump the
-        # replayed match to just after Quinouani's goal (53rd minute)
-        page.evaluate("(t) => window.__studio?.seek ? window.__studio.seek(t) : null", seek_ms)
-        page.locator("#cut").scroll_into_view_if_needed()
-        expect(page.locator("#reel-list .reel-item.goal").first).to_be_visible(timeout=60_000)
+        # replayed match to just after Quinouani's second goal (74th minute, a one-two finish)
+        seek(page, seek_ms)
         shot(page, out, "02-goal-lands-in-the-reel")
 
         page.locator("#reel-list .reel-item.goal button", has_text="Play").first.click()
@@ -72,6 +85,17 @@ def run(base: str, code: str, out: Path, seek_ms: int = 3_290_000) -> None:
         if video:
             Path(video.path()).replace(out / "journey.webm")
             print("  journey.webm", flush=True)
+
+        # watching on a television or a laptop instead: Share shows a QR code that takes the
+        # clip to the fan's phone, where the apps they post from are
+        desk = browser.new_context(viewport=LAPTOP).new_page()
+        sign_in(desk, base, code)
+        seek(desk, seek_ms)
+        desk.locator("#reel-list .reel-item.goal button", has_text="Play").first.click()
+        desk.click("#moment-share")
+        expect(desk.locator("#moment-qr-wrap")).to_be_visible(timeout=60_000)
+        expect(desk.locator("#moment-qr")).to_have_js_property("complete", True)
+        shot(desk, out, "07-big-screen-hands-over-by-qr")
         browser.close()
 
 
@@ -80,7 +104,7 @@ def main() -> None:
     p.add_argument("--base", default="http://127.0.0.1:8765")
     p.add_argument("--out", default="out/journey")
     p.add_argument(
-        "--seek", type=int, default=3_290_000, help="match ms to jump to (default: after the first goal)"
+        "--seek", type=int, default=4_545_000, help="match ms to jump to (default: after the second goal)"
     )
     a = p.parse_args()
     started = time.monotonic()

@@ -4,7 +4,7 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 from matchcut_api import Settings, create_app
-from matchcut_api.app import sha256
+from matchcut_api.app import qr_svg, sha256
 from matchcut_api.cuts import CutRequest, Film, LocalCuts, progress
 from matchcut_contracts import Cue, CueStatus, MomentKind
 
@@ -137,6 +137,19 @@ def test_rate_limit(settings):
     codes = [c.get("/api/matches").status_code for _ in range(5)]
     assert codes[:3] == [401, 401, 401]
     assert codes[3:] == [429, 429]
+
+
+def test_behind_the_ingress_each_caller_has_their_own_rate_limit(settings):
+    settings.requests_per_minute = 2
+    settings.proxy_hops = 1  # every socket comes from the ingress, which appends the caller
+    c = TestClient(create_app(settings))
+
+    def get(chain: str) -> int:
+        return c.get("/api/matches", headers={"X-Forwarded-For": chain}).status_code
+
+    assert [get("203.0.113.5") for _ in range(3)] == [401, 401, 429]
+    assert get("198.51.100.7") == 401  # another fan is not blocked by the first
+    assert get("198.51.100.99, 203.0.113.5") == 429  # an address forged on the left changes nothing
 
 
 def test_spoken_lines_are_served_only_by_strict_name(settings):
@@ -359,6 +372,25 @@ def test_share_links_open_exactly_one_clip_and_refuse_tampering(settings, tmp_pa
     body, sig = url.removeprefix("/s/").split(".")
     assert public.get(f"/s/{body}.{sig[::-1]}").status_code == 404
     assert public.get("/s/not-a-token").status_code == 404
+
+
+def test_shared_links_preview_in_chats_and_hand_over_to_a_phone_by_qr(settings, tmp_path):
+    client = _reel_client(settings, tmp_path)
+    _login(client)
+    body = {"match": MATCH, "aspect": "9x16", "key": "goal-3274800", "lang": "en"}
+    url = client.post("/api/share", json=body).json()["url"]
+    public = TestClient(client.app)
+    https = {"X-Forwarded-Proto": "https"}  # the ingress ends TLS
+    page = public.get(url, headers=https)
+    assert f'property="og:image" content="https://testserver{url}.jpg"' in page.text  # chats show the poster
+    assert public.get(f"{url}.jpg").content.startswith(b"\xff\xd8")
+    qr = public.get(f"{url}/qr.svg", headers=https)
+    assert qr.headers["content-type"].startswith("image/svg+xml")
+    assert qr.content == qr_svg(f"https://testserver{url}")  # the code holds exactly the public link
+    assert qr.content != qr_svg(f"http://testserver{url}")
+    forged = url[:-1] + ("A" if url[-1] != "A" else "B")
+    assert public.get(f"{forged}/qr.svg").status_code == 404
+    assert public.get(f"{forged}.jpg").status_code == 404
 
 
 def test_moment_media_checks_names_and_serves_posters_and_films(settings, tmp_path):
