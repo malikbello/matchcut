@@ -72,6 +72,12 @@ body.render.overlay .screen canvas, body.render.overlay .scorebug, body.render.o
 body.render.overlay .replay-bug, body.render.overlay .film-card, body.render.overlay .wipe { display: none !important; }
 body.render.overlay .cue { animation: none !important; }
 body.render.on-card .scorebug, body.render.on-card .player-tag, body.render.on-card .cue, body.render.on-card .replay-bug { display: none !important; }
+/* the caller's words (overlay mode only): shared films are mostly watched muted, so the call
+   reads on screen while it is voiced, above the caption card's zone */
+.call-line { position: absolute; left: 50%; bottom: 26%; transform: translateX(-50%); width: max-content; max-width: 88%; margin: 0;
+  padding: 10px 20px 8px; border-inline-start: 6px solid var(--signal); border-radius: 10px; background: rgba(7, 9, 13, 0.9);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45); color: var(--chalk); font: 900 34px/1.05 var(--display); letter-spacing: 0.02em;
+  text-transform: uppercase; text-align: center; text-wrap: balance; }
 /* vertical films are watched on phones at about 390 points wide: everything reads at arm's length,
    the GOAL strap owns the upper third and the caption the lower third, so they never collide */
 body.render.aspect-9x16 .scorebug { top: 3.5%; left: 4%; transform: scale(1.3); transform-origin: top left; }
@@ -89,6 +95,7 @@ body.render.aspect-9x16 .cue-kind { font-size: 16px; }
 body.render.aspect-9x16 .cue-kind .icon { width: 20px; height: 20px; }
 body.render.aspect-9x16 .cue-text { font-size: 36px; line-height: 1.12; margin: 10px 0 12px; }
 body.render.aspect-9x16 .cue-text:lang(ar) { font-size: 32px; }
+body.render.aspect-9x16 .call-line { bottom: 34%; font-size: 52px; padding: 14px 26px 12px; border-radius: 14px; }
 body.render.aspect-9x16 .stamp { font-size: 16px; }
 body.render.aspect-9x16 .player-tag .num { font-size: 26px; min-width: 40px; }
 body.render.aspect-9x16 .player-tag .name { font-size: 25px; padding: 7px 12px 6px; }
@@ -132,7 +139,7 @@ body.render.aspect-9x16 .film-card .fc-sub { font-size: 26px; max-width: 90%; }
 .wipe .bar { position: absolute; top: -20%; bottom: -20%; width: 70%; transform: skewX(-18deg); animation: wipeAcross 600ms cubic-bezier(0.7, 0, 0.3, 1) forwards; }
 .wipe .bar.a { background: var(--signal); left: -80%; }
 .wipe .bar.b { background: var(--ink-950); left: -95%; animation-delay: 60ms; }
-.wipe .mark { position: absolute; inset: 0; display: grid; place-items: center; font: 900 clamp(32px, 6vw, 72px)/1 var(--display); color: var(--chalk); letter-spacing: 0.04em; animation: wipeMark 600ms ease forwards; opacity: 0; }
+.wipe .mark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font: 900 clamp(32px, 6vw, 72px)/1 var(--display); color: var(--chalk); letter-spacing: 0.04em; animation: wipeMark 600ms ease forwards; opacity: 0; }
 .wipe .mark span { color: var(--signal); display: inline-block; transform: skewX(-14deg); }
 @keyframes wipeAcross { 0% { left: -95%; } 50% { left: 15%; } 100% { left: 130%; } }
 @keyframes wipeMark { 30% { opacity: 0; } 50% { opacity: 1; } 75% { opacity: 1; } 100% { opacity: 0; } }

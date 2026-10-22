@@ -79,6 +79,11 @@ export async function loadLibrary({ privateBase, publicBase }) {
   }
 }
 
+// A keeper's dive to each side and the second of the clip he is at full stretch, read off renders
+// with the motion probe (the meta's contact frame is the hand's fastest moment, at the launch):
+// diving_save 1.0 s (measured, kes-wcr-7 75'); diving_save_2 1.5 s (its launch is 0.47 s later)
+const DIVES = { right: ["goalkeeper_diving_save_2", 1.5], left: ["goalkeeper_diving_save", 1.0] };
+
 // Pick the clip for an on-ball event. Returns { clip, faceTarget } or null.
 export function actionFor(ev, { keeper, speed, meta }) {
   const [, type, , body, outcome, , , ex, ey] = ev;
@@ -105,6 +110,11 @@ export function actionFor(ev, { keeper, speed, meta }) {
       return { clip: outcome === "success" ? pick("goalkeeper_catch", "goalkeeper_diving_save") : pick("goalkeeper_diving_save"), faceTarget: false, dive: true };
     case "goal":
       return keeper ? { clip: pick("goalkeeper_miss", "goalkeeper_diving_save_2"), faceTarget: false } : null;
+    case "beaten": { // the keeper a goal beats: a full-stretch dive that never touches the ball
+      if (!keeper) return null;
+      const [clip, stretch] = DIVES[body === "right" ? "right" : "left"];
+      return pick(clip) ? { clip, faceTarget: true, beaten: true, stretch } : null;
+    }
     case "tackle":
       return { clip: speed > 2 ? pick("soccer_tackle_2", "soccer_tackle") : pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false };
     case "interception":

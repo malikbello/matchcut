@@ -77,6 +77,14 @@ class Studio:
             self.page.screenshot(path=str(out), type="png", omit_background=True)
         return bool(shown)
 
+    def line(self, lang: str, text: str, out: Path) -> bool:
+        """One of the caller's lines alone, transparent around it, as a full-frame PNG."""
+        assert self.page
+        shown = self.page.evaluate("(a) => window.__render.line(a)", {"lang": lang, "text": text})
+        if shown:
+            self.page.screenshot(path=str(out), type="png", omit_background=True)
+        return bool(shown)
+
     def card(self, title: str, sub: str, t: float, out: Path) -> Path:
         """A title or end card still (its clip is made by holding it)."""
         assert self.page

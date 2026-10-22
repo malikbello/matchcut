@@ -257,6 +257,32 @@ def cmd_clip(a: argparse.Namespace) -> list[Path]:
     return made
 
 
+def cmd_captions(a: argparse.Namespace) -> list[Path]:
+    """Caption rendered clips again from their clean renders (new lines, new languages): the
+    Studio draws only the overlays, never a frame of play."""
+    from matchcut_editing.edl import segments_for  # noqa: PLC0415
+    from matchcut_editing.inputs import VOICED  # noqa: PLC0415
+
+    from matchcut_recap.clips import caption_clip  # noqa: PLC0415
+
+    data, folder = Path(a.data), _pieces_dir(a)
+    langs = a.langs.split(",") if a.langs else VOICED
+    manifest = json.loads((folder / "manifest.json").read_text(encoding="utf-8"))
+    packages = {int(t): d for t, d in manifest["packages"].items()}
+    clean = sorted(p.name.removesuffix(".clean.mp4") for p in folder.glob("*.clean.mp4"))
+    keys = a.keys.split(",") if a.keys else clean
+    code = os.environ.get("MATCHCUT_RENDER_CODE", "")
+    made: list[Path] = []
+    with Studio(a.base, code, a.match, "en", a.aspect, gpu_less=a.gpu_less) as studio:
+        for key in keys:
+            joined = folder / f"{key}.clean.mp4"
+            segs = segments_for(key, packages)
+            pieces = caption_clip(studio, key, segs, joined, data, a.match, langs, folder, a.ffmpeg)
+            made += list(pieces.values())
+            print(f"captions {key}: {', '.join(sorted(pieces))}", flush=True)
+    return made
+
+
 def cmd_cards(a: argparse.Namespace) -> list[Path]:
     """Render the title cards (every focus, every language) and the end cards."""
     from matchcut_editing.inputs import VOICED, focuses  # noqa: PLC0415
@@ -316,6 +342,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--gpu-less", action="store_true")
     for name, helptext in (
         ("clip", "render moment clips and caption them per language"),
+        ("captions", "caption rendered clips again from their clean renders"),
         ("cards", "render title and end cards"),
     ):
         c = sub.add_parser(name, help=helptext)
@@ -332,6 +359,9 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     if args.cmd == "clip":
         cmd_clip(args)
+        return
+    if args.cmd == "captions":
+        cmd_captions(args)
         return
     if args.cmd == "cards":
         cmd_cards(args)

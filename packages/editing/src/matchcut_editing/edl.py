@@ -35,6 +35,8 @@ MAX_FILM_S = 95.0
 VOICE_GAP_S = 0.25
 MAX_VOICE_SHIFT_S = 3.5  # a line that would land later than this after its moment is dropped
 REPLAY_ANALYSIS_AT_S = 8.4  # into the package: the first replay angle has started
+CALL_LINE_TAIL_S = 0.6  # the caller's words stay up this long after his voice stops
+MIN_CALL_LINE_S = 1.0  # a call line cut shorter than this by a caption never airs
 
 CHANCE_KINDS = {"big_chance", "great_save"}
 
@@ -390,6 +392,28 @@ def clip_captions(
 ) -> list[tuple[float, float, str]]:
     """Caption windows inside one clip, in the clip's own seconds (the same rule as a whole cut)."""
     return _captions(Cut("", language, "", "", "", segments=list(segments)), cues)
+
+
+def call_lines(cut: Cut, calls: list[dict]) -> list[tuple[float, float, str]]:
+    """The caller's words on screen while he says them, for films watched muted (as most shared
+    video is): each call's line airs where the soundtrack placed its voice, stays a moment after
+    it, and gives way to the next call. A verified caption has the screen: a call voiced while one
+    is up is heard, not shown, and a line ends when a caption arrives. (film start, film end, words)"""
+    words = {c["audio"]: c["text"] for c in calls if c.get("audio") and c.get("text")}
+    said = [
+        (e.at, e.at + e.duration, words[e.file]) for e in cut.audio if e.role == "call" and e.file in words
+    ]
+    out = []
+    for k, (a, b, text) in enumerate(said):
+        if any(ca <= a < cb for ca, cb, _m in cut.captions):
+            continue
+        end = max(b + CALL_LINE_TAIL_S, a + MIN_CAPTION_S)
+        if k + 1 < len(said):
+            end = min(end, said[k + 1][0])
+        end = min([end, cut.duration] + [ca for ca, _cb, _m in cut.captions if ca > a])
+        if end - a >= MIN_CALL_LINE_S:
+            out.append((round(a, 3), round(end, 3), text))
+    return out
 
 
 def frames(cut: Cut, fps: int) -> list[dict[str, Any]]:

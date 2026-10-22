@@ -462,24 +462,28 @@ export class Player {
     let actionWeight = 0;
     let act = null;
     let strike = null;
+    let now = null; // the action playing and its clip time, for motion QA
     if (event) {
       const meta = this.lib.meta;
       const choice = actionFor(event, { keeper: this.keeper, speed: s, meta });
       const a = choice?.clip ? this._action(choice.clip) : null;
       if (a) {
         const m = meta[choice.clip] ?? { contact: 0.3, duration: a.getClip().duration };
-        const local = (tMs - event[0]) / 1000 + m.contact; // seconds into the clip
+        const local = (tMs - event[0]) / 1000 + (choice.stretch ?? m.contact); // seconds into the clip
         const dur = a.getClip().duration;
-        if (local >= 0 && local <= dur) {
+        // a beaten keeper moves only once he can react to the strike (event[4]), from mid-windup
+        const since = choice.beaten ? (tMs - event[4]) / 1000 : local;
+        if (since >= 0 && local >= 0 && local <= dur) {
           act = a;
           a.time = local;
-          actionWeight = Math.min(1, local / FADE_IN, (dur - local) / FADE_OUT);
+          now = { clip: choice.clip, at: Math.round(local * 100) / 100 };
+          actionWeight = Math.min(1, since / FADE_IN, (dur - local) / FADE_OUT);
           // the ball is drawn onto the striking bone in the fifth of a second before contact,
           // and let go just after it, when the tracked ball takes over in flight
           const bone = this.strikers[m.contact_bone];
           const before = THREE.MathUtils.smoothstep(local, m.contact - 0.22, m.contact);
           const after = 1 - THREE.MathUtils.smoothstep(local, m.contact, m.contact + 0.05);
-          strike = bone && !this.catching ? { bone, w: Math.min(before, after) } : null;
+          strike = bone && !this.catching && !choice.beaten ? { bone, w: Math.min(before, after) } : null;
           if (choice.faceTarget && event[7] >= 0) {
             const tx = event[7] / 10 - 52.5;
             const tz = event[8] / 10 - 34;
@@ -490,6 +494,7 @@ export class Player {
     }
     this.strike = strike && strike.w > 0 ? strike : null;
     this.acting = Boolean(act);
+    this.actionNow = now;
     for (const a of this.actions.values()) if (a !== act) a.setEffectiveWeight(0);
     if (act) act.setEffectiveWeight(actionWeight);
 

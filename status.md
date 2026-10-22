@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Wed 21 Oct 2026 · **Phase:** D6 (Azure live) on `d5/fan-cuts`; D4 and D5 merged (#8)
+**Updated:** Thu 22 Oct 2026 · **Phase:** D6 (Azure live) on `d5/fan-cuts`; D4 and D5 merged (#8)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -15,7 +15,15 @@
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
 
-## Resume here (handoff, 22 Oct): Malik's review, waiting for him
+## Resume here (handoff, 22 Oct evening): working through Malik's six points
+- **Fixed in code (points 1 to 3):** arms (Rocketbox rest-pose matching), bodies held out of the net, pass flights, a pitch-side close camera near goals, behind-goal framing 10 m on phones.
+- **Found in the frame-by-frame review (point 4) and fixed:** the wipe logo broke into three rows (grid with anonymous items; now flex); the ball sat in the net 1.7 s before the 53rd-minute goal counted (the engine let the scorer carry it over the line), now held on the line outside a scoring shot (`holdOnLine` in show3d/main.js); after a goal package the live camera stayed on the replay camera (now restored to the fan's camera).
+- **Engine flaws to fix at the next match generation (not now: regenerating kes-wcr-7 re-runs insights, 770 voiced calls and every clip):** players are not kept out of the goal (keepers and attackers walk in behind the line); a ball carried over the line between the posts is neither a goal nor out; after a save the ball can roll on behind the line (8 of 10 goal-mouth entries in kes-wcr-7 are not goals). The Studio guards all three when drawing.
+- **Point 5:** the dribble clip (Kaluamont, 21st minute, 37.5 m past four challenges) now has voiced and captioned calls (CD calls from tracking, `dribble_calls`). Direct free kicks do not exist in the engine (free kicks restart as passes): an engine feature, offered to Malik. The showcase goal is now the 75th-minute one-two finish (goal-4525700).
+- **Commentary on screen:** each call's words are burned into clips while voiced (`call_lines`, Studio `__render.line`), for muted social viewing; `matchcut-recap captions` re-captions clean clips without drawing frames.
+- **Point 6:** `matchcut-journey` drives the fan journey on a phone viewport and records it (journey.webm plus screenshots).
+
+## Handoff (22 Oct, morning): Malik's review
 Malik reviewed out/review/quinouani-goal-en-9x16.mp4 (Rocketbox players, ball truth, fast assembly) and did not accept it yet. He said do nothing until he is back. Open points, in his words and order:
 1. Players' hands point to the back (arm pose: check the Rocketbox Biped arm retarget, clip by clip).
 2. Players run into and through the goal net (keep bodies out of the goal frame and net).
