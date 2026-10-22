@@ -211,7 +211,7 @@ def piece_blob(match: str, aspect: str, name: str) -> str:
 def render_clip(blobs: Any, req: dict[str, Any]) -> None:
     """A moment clip, rendered once for every fan: sliced like films, then captioned in every
     voiced language and published with its poster frame, and the match manifest updated."""
-    from matchcut_editing.edl import clip_plan  # noqa: PLC0415
+    from matchcut_editing.edl import clip_plan, segments_for  # noqa: PLC0415
     from matchcut_editing.inputs import VOICED, best_cues  # noqa: PLC0415
 
     from matchcut_recap.cli import write_manifest  # noqa: PLC0415
@@ -228,24 +228,24 @@ def render_clip(blobs: Any, req: dict[str, Any]) -> None:
     def studio() -> Studio:
         return Studio(a.base, code, match, "en", aspect, gpu_less=True)
 
-    def plan_with(st: Studio) -> dict[str, list]:
+    def segments_with(st: Studio) -> list:
+        """This clip's segments: a moment from the match's plan, or a window a fan clipped."""
         packages = {g["t"]: st.package_duration(g["t"]) for g in feed.get("goals", [])}
         plan = clip_plan(feed, cues, packages)
         manifest = write_manifest(SCRATCH, packages, plan, a.fps)
         blobs.upload_blob(piece_blob(match, aspect, "manifest.json"), manifest.read_bytes(), overwrite=True)
-        return plan
+        return plan.get(key) or segments_for(key, packages)
 
     def render_part(i: int) -> Path:
         with studio() as st:
-            plan = plan_with(st)
+            segs = segments_with(st)
             return render_clip_part(
-                st, plan[key], a.fps, i, int(req.get("chunks", 1)), SCRATCH / f"{key}-{i:02d}.mp4"
+                st, segs, a.fps, i, int(req.get("chunks", 1)), SCRATCH / f"{key}-{i:02d}.mp4"
             )
 
     def finish(parts: list[Path]) -> None:
         with studio() as st:
-            plan = plan_with(st)
-            pieces = finish_clip(st, key, plan[key], parts, data, match, VOICED, SCRATCH)
+            pieces = finish_clip(st, key, segments_with(st), parts, data, match, VOICED, SCRATCH)
         for lang, path in pieces.items():
             name = f"{key}.jpg" if lang == "poster" else f"{key}.{lang}.mp4"
             with path.open("rb") as f:
