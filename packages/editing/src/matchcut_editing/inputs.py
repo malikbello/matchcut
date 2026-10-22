@@ -44,29 +44,44 @@ def best_cues(path: Path, lang: str) -> list[dict]:
     return sorted(best.values(), key=lambda r: r["t_ms"])
 
 
+# files never change once written, so each is decompressed or measured once per version (a server
+# answers every fan's reel from these; a probe per voice file per request would not scale)
+_FEEDS: dict[Path, tuple[float, dict]] = {}
+_DURATIONS: dict[tuple[Path, float], float] = {}
+
+
+def read_feed(data: Path, match: str) -> dict:
+    """The match's tracking feed, decompressed once per file version (callers only read it)."""
+    path = data / "feeds" / f"{match}.json.gz"
+    mtime = path.stat().st_mtime
+    hit = _FEEDS.get(path)
+    if hit is None or hit[0] != mtime:
+        hit = (mtime, json.loads(gzip.decompress(path.read_bytes())))
+        _FEEDS[path] = hit
+    return hit[1]
+
+
 def voice_durations(files: set[str], media_root: Path, ffprobe: str = "ffprobe") -> dict[str, float]:
-    """Seconds of each voiced file, measured (the soundtrack never overlaps two lines)."""
+    """Seconds of each voiced file, measured once (the soundtrack never overlaps two lines)."""
     out = {}
     for f in files:
-        r = subprocess.run(  # noqa: S603 - our own arguments
-            [
-                ffprobe,
-                "-v",
-                "error",
-                "-show_entries",
-                "format=duration",
-                "-of",
-                "csv=p=0",
-                str(media_root / f),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        path = media_root / f
         try:
-            out[f] = float(r.stdout.strip())
-        except ValueError:
+            key = (path, path.stat().st_mtime)
+        except OSError:
             continue
+        if key not in _DURATIONS:
+            r = subprocess.run(  # noqa: S603 - our own arguments
+                [ffprobe, "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(path)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            try:
+                _DURATIONS[key] = float(r.stdout.strip())
+            except ValueError:
+                continue
+        out[f] = _DURATIONS[key]
     return out
 
 
@@ -80,7 +95,7 @@ class MatchInputs:
 
 def load(data: Path, match: str, lang: str, ffprobe: str = "ffprobe") -> MatchInputs:
     """Feed, best cues and calls in one language, and the length of every voice file they use."""
-    feed = json.loads(gzip.decompress((data / "feeds" / f"{match}.json.gz").read_bytes()))
+    feed = read_feed(data, match)
     cues = best_cues(data / "insights" / f"{match}.jsonl", lang)
     calls_path = data / "calls" / f"{match}.json"
     calls = (

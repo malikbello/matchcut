@@ -4,7 +4,7 @@
 
 Sign in, follow Kestrel Bay, watch the match reach a goal, see it land in the reel, play it,
 share it (the public link a friend opens without the access code), and clip a stretch of play;
-then the same goal on a laptop, handed over to the phone by QR code.
+and the same goal on a laptop, handed over to the phone by QR code.
 It is both the demonstration of how a fan uses Matchcut and an end-to-end test: every step
 asserts what a fan would see. The fan's session is also recorded (journey.webm).
 """
@@ -30,15 +30,20 @@ def shot(page: Page, out: Path, name: str) -> None:
 
 
 def sign_in(page: Page, base: str, code: str) -> None:
+    """Sign in and wait until the match is on: clubs in the score bug, the stadium drawn."""
     page.goto(base)
     page.fill("#code", code)
     page.click("#gate-form button[type=submit]")
     expect(page.locator("#studio")).to_be_visible(timeout=60_000)
+    page.wait_for_function("() => Boolean(window.__studio)", timeout=60_000)
+    expect(page.locator("#home-code")).not_to_have_text("HOM", timeout=60_000)
+    expect(page.locator("#show-loading")).to_be_hidden(timeout=120_000)
+    page.wait_for_timeout(1500)  # a few frames of play
 
 
 def seek(page: Page, seek_ms: int) -> None:
     """Jump the replayed match to seek_ms, with the fan's reel in view and a goal in it."""
-    page.evaluate("(t) => window.__studio?.seek ? window.__studio.seek(t) : null", seek_ms)
+    page.evaluate("(t) => window.__studio.seek(t)", seek_ms)
     page.locator("#cut").scroll_into_view_if_needed()
     expect(page.locator("#reel-list .reel-item.goal").first).to_be_visible(timeout=60_000)
 
@@ -47,6 +52,22 @@ def run(base: str, code: str, out: Path, seek_ms: int = 4_545_000) -> None:
     out.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
+
+        # watching on a television or a laptop: Share shows a QR code that takes the clip to the
+        # fan's phone, where the apps they post from are (first: the phone's Clip that, last,
+        # starts a real render that would slow everything after it)
+        desk = browser.new_context(viewport=LAPTOP)
+        big = desk.new_page()
+        sign_in(big, base, code)
+        seek(big, seek_ms)
+        big.locator("#reel-list .reel-item.goal button", has_text="Play").first.click()
+        big.click("#moment-share")
+        expect(big.locator("#moment-qr-wrap")).to_be_visible(timeout=60_000)
+        expect(big.locator("#moment-qr")).to_have_js_property("complete", True)
+        shot(big, out, "07-big-screen-hands-over-by-qr")
+        desk.close()
+
+        # on the phone, recorded
         ctx = browser.new_context(
             viewport=PHONE, device_scale_factor=2, is_mobile=True, has_touch=True,
             record_video_dir=str(out), record_video_size=PHONE,
@@ -85,17 +106,6 @@ def run(base: str, code: str, out: Path, seek_ms: int = 4_545_000) -> None:
         if video:
             Path(video.path()).replace(out / "journey.webm")
             print("  journey.webm", flush=True)
-
-        # watching on a television or a laptop instead: Share shows a QR code that takes the
-        # clip to the fan's phone, where the apps they post from are
-        desk = browser.new_context(viewport=LAPTOP).new_page()
-        sign_in(desk, base, code)
-        seek(desk, seek_ms)
-        desk.locator("#reel-list .reel-item.goal button", has_text="Play").first.click()
-        desk.click("#moment-share")
-        expect(desk.locator("#moment-qr-wrap")).to_be_visible(timeout=60_000)
-        expect(desk.locator("#moment-qr")).to_have_js_property("complete", True)
-        shot(desk, out, "07-big-screen-hands-over-by-qr")
         browser.close()
 
 
