@@ -814,6 +814,7 @@ function openMoment(m) {
   $("moment-download").setAttribute("download", `matchcut-${m.key}.mp4`);
   $("moment-text").textContent = m.text || "";
   $("moment-note").textContent = "";
+  $("moment-qr-wrap").hidden = true;
   $("moment-player").showModal();
   $("moment-video").play().catch(() => {});
 }
@@ -822,9 +823,11 @@ async function shareMoment(m) {
   const lang = reelLang();
   const title = `${REEL_KIND[m.key.split("-")[0]] || "Clip"} | Matchcut`;
   const text = m.text || "Every fan's cut.";
-  // on phones: the film itself goes to the share sheet (WhatsApp status, TikTok, Instagram, X)
+  // on phones: the film itself goes to the share sheet (WhatsApp status, TikTok, Instagram, X).
+  // Desktop browsers have a share sheet too, but the apps fans post from live on their phones
+  const phone = matchMedia("(pointer: coarse)").matches;
   try {
-    if (navigator.canShare) {
+    if (phone && navigator.canShare) {
       const blob = await (await fetch(momentUrl(m.key, lang), { credentials: "same-origin" })).blob();
       const file = new File([blob], `matchcut-${m.key}.mp4`, { type: "video/mp4" });
       if (navigator.canShare({ files: [file] })) {
@@ -833,17 +836,24 @@ async function shareMoment(m) {
       }
     }
   } catch { /* the fan closed the sheet, or the browser cannot share files: offer the link */ }
-  // elsewhere: a public link that opens just this clip, with a preview card in chats
+  // elsewhere: a public link that opens just this clip, with a preview card in chats; on a
+  // television or a laptop, a QR code takes it to the fan's phone to post from there
   const r = await fetch("/api/share", {
     method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ match: state.match.match_id, aspect: cut.aspect, key: m.key, lang }),
   });
   if (!r.ok) return;
-  const url = new URL((await r.json()).url, location.origin).href;
+  const path = (await r.json()).url;
+  const url = new URL(path, location.origin).href;
   try { await navigator.clipboard.writeText(url); } catch { /* clipboard blocked: the link is shown */ }
-  const note = $("moment-player").open ? $("moment-note") : $("reel-empty");
+  const open = $("moment-player").open;
+  const note = open ? $("moment-note") : $("reel-empty");
   note.hidden = false;
   note.textContent = `Link copied: ${url}`;
+  if (open && !phone) {
+    $("moment-qr").src = `${path}/qr.svg`;
+    $("moment-qr-wrap").hidden = false;
+  }
 }
 
 async function clipThat() {

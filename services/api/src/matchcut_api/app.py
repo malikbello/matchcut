@@ -18,6 +18,7 @@ import asyncio
 import gzip
 import hashlib
 import hmac
+import io
 import json
 import os
 import re
@@ -29,6 +30,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from pathlib import Path
 
+import segno
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -88,6 +90,7 @@ class Settings:
     port: int = 8080
     cuts_per_hour: int = 6
     cut_chunks: int = 10  # slices rendered in parallel per cut on Azure
+    proxy_hops: int = 0  # reverse proxies in front of the app (1 behind the Container Apps ingress)
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -109,6 +112,7 @@ class Settings:
             pieces_dir=Path(os.environ.get("MATCHCUT_PIECES_DIR", "out/pieces")),
             port=int(os.environ.get("PORT", "8080")),
             cut_chunks=int(os.environ.get("MATCHCUT_CUT_CHUNKS", "10")),
+            proxy_hops=int(os.environ.get("MATCHCUT_PROXY_HOPS", "0")),
         )
 
 
@@ -117,7 +121,34 @@ def sha256(text: str) -> str:
 
 
 def client_id(request: Request) -> str:
+    """Who is calling, for rate limits. Behind a proxy every socket comes from the proxy, which
+    appends the caller's address to X-Forwarded-For: the entry `proxy_hops` from the right is the
+    caller, and entries further left are whatever the client sent (never trusted)."""
+    hops = getattr(request.app.state, "proxy_hops", 0)
+    if hops:
+        chain = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        if len(chain) >= hops:
+            return chain[-hops]
     return request.client.host if request.client else "unknown"
+
+
+def public_base(request: Request) -> str:
+    """The site's address for links that leave it (share cards, QR codes). The ingress ends TLS,
+    so the app sees http; X-Forwarded-Proto names the scheme the visitor used. Only the scheme is
+    taken from it: a spoofed header changes nothing but the links in the spoofer's own response."""
+    base = str(request.base_url).rstrip("/")
+    if request.headers.get("x-forwarded-proto", "").lower() == "https" and base.startswith("http://"):
+        base = "https://" + base.removeprefix("http://")
+    return base
+
+
+def qr_svg(url: str) -> bytes:
+    """A link as a QR code (segno): an SVG in the brand's ink on white, with a quiet zone."""
+    out = io.BytesIO()
+    segno.make(url, error="m").save(
+        out, kind="svg", scale=8, border=2, dark="#07090d", light="#ffffff", xmldecl=False
+    )
+    return out.getvalue()
 
 
 # ---------------------------------------------------------------- data access
@@ -186,6 +217,7 @@ def share_page(base: str, token: str, found: tuple[str, str, str, str]) -> str:
     kind = key.split("-")[0]
     title = {"goal": "Goal", "conceded": "Goal", "chance": "Big chance"}.get(kind, "Clip")
     video = f"{base}/s/{token}.mp4"
+    poster = f"{base}/s/{token}.jpg"  # chats (WhatsApp, iMessage, Slack) preview the image, not the video
     w, h = (720, 1280) if aspect == "9x16" else (1280, 720)
     desc = "Every fan's cut. Synthetic match, every line verified."
     return f"""<!doctype html>
@@ -197,10 +229,12 @@ def share_page(base: str, token: str, found: tuple[str, str, str, str]) -> str:
 <meta property="og:video" content="{video}"><meta property="og:video:secure_url" content="{video}">
 <meta property="og:video:type" content="video/mp4"><meta property="og:video:width" content="{w}">
 <meta property="og:video:height" content="{h}"><meta name="twitter:card" content="player">
+<meta property="og:image" content="{poster}"><meta property="og:image:width" content="{w}">
+<meta property="og:image:height" content="{h}"><meta name="twitter:image" content="{poster}">
 <meta name="twitter:title" content="{title} | Matchcut"><meta name="twitter:player:stream" content="{video}">
 <link rel="stylesheet" href="/share.css"></head>
 <body><main class="share"><div class="mark">MATCH<span>C</span>UT</div>
-<video src="/s/{token}.mp4" controls playsinline autoplay muted loop></video>
+<video src="/s/{token}.mp4" poster="/s/{token}.jpg" controls playsinline autoplay muted loop></video>
 <p>{desc}</p></main></body></html>"""
 
 
@@ -242,6 +276,7 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
     per_client = parse(f"{s.requests_per_minute}/minute")
     open_streams: dict[str, int] = defaultdict(int)
     app = FastAPI(title="Matchcut API", version="0.2.0", docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.proxy_hops = s.proxy_hops
 
     @app.middleware("http")
     async def guard(request: Request, call_next):  # type: ignore[no-untyped-def]
@@ -502,14 +537,33 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
             raise HTTPException(404, "not found")
         return film_response(film, request, public=True)
 
+    @app.get("/s/{token}.jpg")
+    def shared_poster(token: str) -> FileResponse:
+        """The shared clip's poster frame: the picture a chat shows in the link preview."""
+        found = reel.read_token(token)
+        poster = reel.pieces.path(found[0], found[1], f"{found[2]}.jpg") if found else None
+        if poster is None:
+            raise HTTPException(404, "not found")
+        return FileResponse(
+            poster, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"}
+        )
+
+    @app.get("/s/{token}/qr.svg")
+    def shared_qr(token: str, request: Request) -> Response:
+        """The shared link as a QR code: watching on a television or a laptop, the fan points a
+        phone camera at it and the clip opens on the phone, where the apps they post from are."""
+        if reel.read_token(token) is None:
+            raise HTTPException(404, "not found")
+        svg = qr_svg(f"{public_base(request)}/s/{token}")
+        return Response(svg, media_type="image/svg+xml", headers={"Cache-Control": "public, max-age=86400"})
+
     @app.get("/s/{token}")
     def shared_page(token: str, request: Request) -> Response:
         """The page a shared link opens: the clip, and the tags that make chats show it."""
         found = reel.read_token(token)
         if found is None:
             raise HTTPException(404, "not found")
-        base = str(request.base_url).rstrip("/")
-        return Response(share_page(base, token, found), media_type="text/html; charset=utf-8")
+        return Response(share_page(public_base(request), token, found), media_type="text/html; charset=utf-8")
 
     @app.get("/media/{match_id}/clip.mp4", dependencies=[Depends(require_session)])
     def media(match_id: str) -> FileResponse:
