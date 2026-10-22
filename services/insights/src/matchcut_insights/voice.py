@@ -204,7 +204,7 @@ def voice_calls(
         key = voice_key(call.language, mood, live=True)
         if key is None:
             continue
-        key = f"{key}+lift" if call.kind == "build" else key
+        key = f"{key}+lift" if call.kind in ("build", "run") else key
         rel = Path("audio") / match_id / f"{call.call_id}.mp3"
         call.audio, call.voice = rel.as_posix(), key
         if not ((Path(media_root) / rel).is_file() and manifest.get(call.call_id) == key):

@@ -2,8 +2,9 @@
 
 Moment clips (a goal with its celebration and replays, a goal conceded, a big chance) are drawn
 by the Studio in render mode, captions off, sliced across job replicas like films. A finished
-clip is then captioned once per voiced language: the Studio renders each verified caption card
-alone on a transparent page and ffmpeg lays it over the clip with the broadcast fades. Cards are
+clip is then captioned once per voiced language: the Studio renders each verified caption card,
+and each of the caller's lines (shared films are mostly watched muted), alone on a transparent
+page and ffmpeg lays it over the clip with the broadcast fades. Cards are
 stills held for their duration. Every piece is encoded with the same settings, so a fan's cut is
 a lossless join plus a soundtrack mix (matchcut_editing.assembly), done in seconds.
 """
@@ -20,12 +21,14 @@ from matchcut_editing.edl import (
     CONCEDED_BEFORE_S,
     RUN_UP_S,
     Segment,
+    call_lines,
     clip_captions,
     clip_frames,
     end_card,
+    moment_cut,
     title_card,
 )
-from matchcut_editing.inputs import LANGUAGE_NAMES, best_cues
+from matchcut_editing.inputs import LANGUAGE_NAMES, load
 
 from matchcut_recap.render import Studio, concat
 
@@ -55,6 +58,42 @@ def render_clip_part(
     )
 
 
+def caption_clip(
+    studio: Studio,
+    key: str,
+    segments: list[Segment],
+    joined: Path,
+    data: Path,
+    match: str,
+    langs: list[str],
+    work: Path,
+    ffmpeg: str = "ffmpeg",
+) -> dict[str, Path]:
+    """Caption a clean clip once per language: the verified caption cards, and the caller's
+    words where the soundtrack voices them (the same plan the clip's soundtrack is mixed from)."""
+    packages = {s.goal_t: s.duration for s in segments if s.kind == "package" and s.goal_t is not None}
+    out: dict[str, Path] = {}
+    for lang in langs:
+        inp = load(data, match, lang)
+        overlays = []
+        for a, b, moment in clip_captions(segments, inp.cues, lang):
+            png = work / f"{key}.{lang}.{moment}.png"
+            if studio.caption(lang, moment, png):
+                overlays.append((png, a, b))
+        said = moment_cut(
+            inp.feed, inp.cues, inp.calls, key, language=lang, aspect=studio.aspect,
+            package_durations=packages, clip_durations=inp.durations,
+        )  # fmt: skip
+        for n, (a, b, words) in enumerate(call_lines(said, inp.calls)):
+            png = work / f"{key}.{lang}.call{n:02d}.png"
+            if studio.line(lang, words, png):
+                overlays.append((png, a, b))
+        piece = work / f"{key}.{lang}.mp4"
+        run(caption_command(joined, overlays, piece, ffmpeg))
+        out[lang] = piece
+    return out
+
+
 def finish_clip(
     studio: Studio,
     key: str,
@@ -68,17 +107,7 @@ def finish_clip(
 ) -> dict[str, Path]:
     """Join a clip's slices, then caption it once per language; also a poster frame."""
     joined = concat(parts, work / f"{key}.clean.mp4", ffmpeg)
-    out: dict[str, Path] = {}
-    for lang in langs:
-        cues = best_cues(data / "insights" / f"{match}.jsonl", lang)
-        overlays = []
-        for a, b, moment in clip_captions(segments, cues, lang):
-            png = work / f"{key}.{lang}.{moment}.png"
-            if studio.caption(lang, moment, png):
-                overlays.append((png, a, b))
-        piece = work / f"{key}.{lang}.mp4"
-        run(caption_command(joined, overlays, piece, ffmpeg))
-        out[lang] = piece
+    out = caption_clip(studio, key, segments, joined, data, match, langs, work, ffmpeg)
     poster = work / f"{key}.jpg"
     at = POSTER_AT.get(key.split("-", maxsplit=1)[0], 1.5)  # the moment itself: the strike, the save
     run(

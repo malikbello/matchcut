@@ -6,8 +6,11 @@ from matchcut_editing.edl import (
     MAX_FILM_S,
     RUN_UP_S,
     TITLE_S,
+    AudioEvent,
+    Cut,
     Segment,
     build_cut,
+    call_lines,
     clip_captions,
     clip_frames,
     clip_plan,
@@ -313,3 +316,38 @@ def test_any_stretch_of_play_is_a_clip_with_its_own_sound():
     )
     assert one.clip_order() == [key]
     assert any(e.role == "call" for e in one.audio)  # the calls inside the window are voiced
+
+
+def test_the_callers_words_are_on_screen_while_he_says_them():
+    calls = [
+        {"t_ms": 991_000, "audio": "audio/m/CD-00001-en.mp3", "text": "Quinouani sets off!"},
+        {"t_ms": 992_000, "audio": "audio/m/CD-00002-en.mp3", "text": "Past one... past two!"},
+        {"t_ms": 999_000, "audio": "audio/m/CA-00002-en.mp3", "text": "GOAL!"},
+    ]
+    durations = {
+        "audio/m/CD-00001-en.mp3": 1.4,
+        "audio/m/CD-00002-en.mp3": 1.6,
+        "audio/m/CA-00002-en.mp3": 1.0,
+    }
+    one = moment_cut(
+        FEED, CUES, calls, window_key(990_000, 1_001_500), language="en", aspect="9x16",
+        package_durations=PACKAGES, clip_durations=durations,
+    )  # fmt: skip
+    lines = call_lines(one, calls)
+    voiced = [e for e in one.audio if e.role == "call"]
+    assert [a for a, _b, _t in lines] == [e.at for e in voiced]  # words and voice start together
+    assert [t for *_, t in lines] == ["Quinouani sets off!", "Past one... past two!", "GOAL!"]
+    first, second, last = lines
+    assert first[1] <= second[0]  # the second call pushes the first line off, never on top of it
+    assert second[1] >= second[0] + 1.6  # the line outlasts the voice
+    assert last[1] - last[0] >= 2.0  # a short call is still readable
+    assert all(b <= one.duration for _a, b, _t in lines)
+
+
+def test_a_verified_caption_has_the_screen_over_a_call_line():
+    cut = Cut("m", "en", "9x16", "", "", segments=[Segment("live", 12.0, t0=0)])
+    cut.captions = [(6.0, 12.0, "MO-1")]
+    cut.audio = [AudioEvent(4.5, "a.mp3", "call", 1.2), AudioEvent(7.0, "b.mp3", "call", 1.0)]
+    calls = [{"audio": "a.mp3", "text": "Here comes Quinouani!"}, {"audio": "b.mp3", "text": "It's in!"}]
+    # the first line gives way when the caption arrives; the second is heard over it, not shown
+    assert call_lines(cut, calls) == [(4.5, 6.0, "Here comes Quinouani!")]

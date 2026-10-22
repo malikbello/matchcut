@@ -72,7 +72,10 @@ export class Director {
       fov = 52;
     } else if (this.mode === "tight") {
       // the close camera on the ball, from the main-stand side like a handheld touchline camera
-      pos = new THREE.Vector3(ball.x - 3, 5.5, ball.z + 15);
+      // near a goal the camera stays on the pitch side of the play, so the net is behind the
+      // players and never between them and the lens (a scorer would look as if inside the net)
+      const dx = Math.abs(ball.x) > L / 2 - 12 ? -Math.sign(ball.x) * 5 : -3;
+      pos = new THREE.Vector3(ball.x + dx, 5.5, ball.z + 15);
       look = new THREE.Vector3(ball.x, 0.9, ball.z);
       fov = 34;
     } else if (this.mode === "goal") {
@@ -80,7 +83,8 @@ export class Director {
       const side = this.goalSide ?? (bx >= 0 ? 1 : -1);
       pos = new THREE.Vector3(side * (L / 2 + (vertical ? 9 : 14)), vertical ? 5 : 6.5, bz * 0.3);
       look = new THREE.Vector3(side * (L / 2 - 16) * 0.5 + bx * 0.5, 1, bz * 0.8);
-      fov = this.fovFor(vertical ? 24 : 40, pos.distanceTo(look));
+      // about 10 m across on a phone (a vertical lens, not a fish-eye), 26 m on widescreen
+      fov = this.fovFor(vertical ? 10 : 26, pos.distanceTo(look));
     } else {
       // gantry in the main stand on the halfway side: pans with the ball and leads the play;
       // the picture is sized in metres of play, so a vertical feed keeps players readable

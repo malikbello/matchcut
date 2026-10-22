@@ -55,7 +55,7 @@ from matchcut_api.reel import MAX_WINDOW_MS, BlobPieces, LocalPieces, Reel
 
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")  # BCP 47: en, en-NG, pcm, ar, yo
-AUDIO_NAME = re.compile(r"^(CU|CA)-\d{5}-[a-z]{2,3}(-[A-Z]{2})?\.mp3$")  # cue lines and play-by-play calls
+AUDIO_NAME = re.compile(r"^(CU|CA|CD)-\d{5}-[a-z]{2,3}(-[A-Z]{2})?\.mp3$")  # cue lines and play-by-play calls
 COOKIE = "mc_session"
 SESSION_TTL_S = 12 * 3600
 # 'wasm-unsafe-eval' lets the 3D show camera compile its meshopt WebAssembly decoder (it does not

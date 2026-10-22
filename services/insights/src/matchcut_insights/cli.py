@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gzip
 import io
 import json
 import statistics
@@ -24,7 +25,7 @@ from matchcut_sim import build_league, simulate_match
 from matchcut_sim.cli import replay_analytics
 
 from matchcut_insights.brain import AgentBrain, Brain
-from matchcut_insights.calls import build_calls
+from matchcut_insights.calls import build_calls, dribble_calls
 from matchcut_insights.facts import MatchContext
 from matchcut_insights.pipeline import InsightsPipeline, MomentReport
 from matchcut_insights.redteam import red_team, report_markdown
@@ -236,6 +237,9 @@ def cmd_calls(args: argparse.Namespace) -> None:
     m = simulate_match(league, args.home, args.away, seed=args.seed)
     names = {p.player_id: p.known_as for p in league.players if p.player_id in set(m.player_ids)}
     calls = build_calls(m.meta.match_id, m.events, names)
+    feed_path = Path(args.feeds) / f"{m.meta.match_id}.json.gz"
+    if feed_path.is_file():  # solo runs come from the tracking feed
+        calls += dribble_calls(m.meta.match_id, json.loads(gzip.decompress(feed_path.read_bytes())))
     if args.voice:
         voiced = voice_calls(calls, m.meta.match_id, AzureSpeech.from_env(), args.media)
         print(f"voiced {voiced} calls -> {args.media}/audio/{m.meta.match_id}")
@@ -278,6 +282,7 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--voice", action="store_true", help="voice the calls with Azure AI Speech")
     c.add_argument("--media", default="out/media")
     c.add_argument("--out-dir", default="out/calls")
+    c.add_argument("--feeds", default="out/feeds", help="tracking feeds, for the calls over solo runs")
     args = p.parse_args(argv)
     if args.cmd == "redteam":
         cmd_redteam(args)

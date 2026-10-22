@@ -189,6 +189,7 @@ function endPackage() {
   state.t = Math.max(state.t, state.pkg.goal.t + 1500);
   state.pkg = null;
   state.show?.endPackage();
+  state.show?.setMode($("cam").value); // back to the fan's camera: the replays used their own
   $("wipe").hidden = true; $("replay-bug").hidden = true; $("skip-replay").hidden = true;
   $("goal-strap").hidden = true; $("tag").hidden = true;
 }
@@ -227,7 +228,7 @@ function seek(t) {
   state.shown = null;
   $("cue").hidden = true;
   rebuildTimeline();
-  updateBug();
+  updateBug(true);
 }
 function tick(now) {
   if (RENDER) return; // films are driven frame by frame by window.__render
@@ -264,7 +265,8 @@ function step(now) {
   draw();
 }
 
-function updateBug() {
+// quiet: the score is set without its goal animation (a jump in time is not a goal)
+function updateBug(quiet = false) {
   $("clock").textContent = clock(state.t);
   let h = 0, a = 0;
   if (state.feed) {
@@ -275,7 +277,8 @@ function updateBug() {
   if ($("home-score").textContent !== String(h) || $("away-score").textContent !== String(a)) {
     $("home-score").textContent = String(h); $("away-score").textContent = String(a);
     const box = document.querySelector(".scorebug .score");
-    box.classList.remove("bump"); void box.offsetWidth; box.classList.add("bump");
+    box.classList.remove("bump");
+    if (!quiet) { void box.offsetWidth; box.classList.add("bump"); }
   }
 }
 
@@ -564,10 +567,22 @@ window.__render = {
       await loadCues();
     }
     const cue = state.moments.find((c) => c.moment_id === moment);
+    $("call-line").hidden = true;
     $("cue").hidden = !cue;
     if (!cue) return false;
     state.shown = null;
     showCue(cue);
+    return true;
+  },
+  // overlay mode: one of the caller's lines, for films watched muted; the plan places it where
+  // the soundtrack voices the call, so the words and the voice land together
+  line({ lang, text }) {
+    document.body.classList.add("overlay");
+    state.shown = null; $("cue").hidden = true;
+    const box = $("call-line");
+    box.textContent = isolateNumbers(text, lang);
+    box.lang = lang; box.dir = RTL.has(lang) ? "rtl" : "ltr";
+    box.hidden = false;
     return true;
   },
   // a card still (title or end) for the card clips, in the card's own language
@@ -585,6 +600,12 @@ window.__render = {
   // seg: { kind: "card" | "live" | "package", t, pt, goalT, title, sub }; index counts output frames
   frame(seg, index, fps) {
     virtualMs = (index * 1000) / fps;
+    let jumped = false;
+    // a frame of play is never drawn in overlay mode (a clip captioned before this one leaves it on)
+    if (document.body.classList.contains("overlay")) {
+      document.body.classList.remove("overlay");
+      $("call-line").hidden = true; $("cue").hidden = true; state.shown = null;
+    }
     const card = $("film-card");
     card.hidden = seg.kind !== "card";
     document.body.classList.toggle("on-card", seg.kind === "card"); // cards stand alone: no score bug or tags
@@ -596,7 +617,7 @@ window.__render = {
       state.t = goal.t + 600;
     } else {
       if (state.pkg) endPackage();
-      const jumped = state.renderPrev === undefined || seg.t < state.renderPrev || seg.t - state.renderPrev > 2000;
+      jumped = state.renderPrev === undefined || seg.t < state.renderPrev || seg.t - state.renderPrev > 2000;
       const before = jumped ? seg.t - 1 : state.renderPrev;
       if (jumped) { state.shown = null; $("cue").hidden = true; state.show.endPackage(); }
       if (seg.cue === undefined && seg.kind === "live") for (const c of state.moments) if (c.t_ms > before && c.t_ms <= seg.t) showCue(c);
@@ -611,7 +632,7 @@ window.__render = {
       if (!want && state.shown) { state.shown = null; $("cue").hidden = true; }
       if (want) state.shownAt = virtualMs - seg.cueAge * 1000;
     }
-    updateBug();
+    updateBug(jumped);
     draw();
     stepAnimations(1000 / fps);
     return true;

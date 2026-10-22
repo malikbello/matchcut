@@ -67,6 +67,8 @@ function keeperKits(feed) {
 
 const GOAL_HALF = 3.66; // half the goal's width (7.32 m)
 const GOAL_CLEAR = 0.45; // how close a body may come to the goal line inside the goal mouth
+const BALL_ON_LINE = 0.3; // where a ball that never went in is held: just in front of the goal line
+const CROSSBAR = 2.44;
 const PASS_DECAY = 0.45; // 1/s: a rolling pass loses about a third of its pace over a second
 const MAX_CONTROLLED_SPEED = 20; // m/s: how fast a ball knocked between players can be drawn moving
 const PASSES = new Set(["pass", "free_kick", "corner", "goal_kick", "kick_off"]);
@@ -108,8 +110,37 @@ function indexEvents(feed) {
   for (const e of feed.events ?? []) if (e[2] >= 0) bySlot[e[2]].push(e);
   // fouled players fall: give the recipient of a foul its own row
   for (const e of feed.events ?? []) if (e[1] === "foul" && e[9] >= 0) bySlot[e[9]].push([e[0], "fouled", e[9], "", "", e[5], e[6], -1, -1, -1]);
+  for (const g of goalShots(feed)) {
+    // the goal belongs to the scorer in the data, but on screen the keeper is beaten: facing the
+    // shooter, he dives to the side the ball goes and is at full stretch just after it passes him;
+    // the dive never starts sooner than a reaction time after the strike (row[4])
+    const right = g.kx < 525 ? g.endY > g.ky : g.endY < g.ky; // facing the field from the left goal, larger y is his right
+    bySlot[g.keeper].push([g.t + 150, "beaten", g.keeper, right ? "right" : "left", g.shot[0] + 150,
+      g.kx, g.ky, g.shot[5], g.shot[6], -1]);
+  }
   for (const list of bySlot) list.sort((a, b) => a[0] - b[0]);
   return bySlot;
+}
+// Each goal from a real strike, with the conceding keeper where he stood as it was struck. A
+// strike the data aims through the keeper (a goal at a keeper's hands reads as a save) is drawn
+// into the corner away from him instead, just inside the post: endY is where it goes in (dm).
+function goalShots(feed) {
+  const events = feed.events ?? [];
+  const out = [];
+  for (const g of events.filter((e) => e[1] === "goal")) {
+    const shot = events.filter((e) => e[1] === "shot" && e[2] === g[2] && e[0] <= g[0] && g[0] - e[0] < 4000).pop();
+    const keeper = (feed.keepers ?? []).find((k) => feed.slots[k] !== feed.slots[g[2]]);
+    if (!shot || keeper === undefined || shot[8] < 0) continue;
+    if (Math.hypot(shot[7] - shot[5], shot[8] - shot[6]) < 40) continue; // a tap-in on the line
+    const [i] = frameAt(feed, shot[0]);
+    const kx = feed.p[i][2 * keeper];
+    const ky = feed.p[i][2 * keeper + 1];
+    if (kx === EMPTY) continue;
+    const through = Math.abs(shot[8] - ky) < 18;
+    const endY = through ? 340 + (ky >= 340 ? -1 : 1) * 29 : shot[8];
+    out.push({ t: g[0], shot, keeper, kx, ky, endY, bend: (endY - shot[8]) / 10 });
+  }
+  return out;
 }
 function eventNear(list, t, before = 2600, after = 3400) {
   // the latest event that started before t + before and is not long finished
@@ -355,6 +386,29 @@ export async function createShow({
     return [f.fromX + (ex - f.fromX) * s, 0.11 + f.loft * 4 * tau * (1 - tau), f.fromZ + (ez - f.fromZ) * s];
   }
 
+  // A ball over the line between the posts is a goal, so the ball is drawn inside a goal only
+  // from a scoring shot until the restart. The engine can carry a ball in, or let a saved shot
+  // roll on, without a goal; there the ball is held on the line, at the feet of whoever has it.
+  const netWindows = (feed.goals ?? []).map((g) => {
+    const shot = (feed.events ?? []).filter((e) => e[1] === "shot" && e[0] <= g.t && g.t - e[0] < 4000).pop();
+    return [shot ? shot[0] : g.t - 300, g.t + 60000];
+  });
+  function holdOnLine(t) {
+    const p = ball.position;
+    const over = Math.abs(p.x) > L / 2 - BALL_ON_LINE && Math.abs(p.z) < GOAL_HALF + 0.3 && p.y < CROSSBAR;
+    if (over && !netWindows.some(([a, b]) => a <= t && t <= b)) p.x = Math.sign(p.x) * (L / 2 - BALL_ON_LINE);
+  }
+  // a strike re-aimed past the keeper (goalShots) bends away from the boot towards the corner
+  // and rests in that corner of the net until it is fetched out for the restart
+  const bends = goalShots(feed).filter((g) => g.bend !== 0);
+  function bendAt(t, inNet) {
+    for (const g of bends) {
+      if (t < g.shot[0] || (t > g.t && !inNet) || t > g.t + 60000) continue;
+      return g.bend * Math.min(1, (t - g.shot[0]) / Math.max(1, g.t - g.shot[0]));
+    }
+    return 0;
+  }
+
   function placeBall(t) {
     flight = flightAt(t);
     if (flight) {
@@ -371,9 +425,11 @@ export async function createShow({
     const [a, b, u] = frameAt(feed, t);
     const ba = feed.b[a];
     const bb = feed.b[b];
-    const [bx, bz] = toWorld((ba[0] + (bb[0] - ba[0]) * u) / 10, (ba[1] + (bb[1] - ba[1]) * u) / 10);
+    const [bx, tz] = toWorld((ba[0] + (bb[0] - ba[0]) * u) / 10, (ba[1] + (bb[1] - ba[1]) * u) / 10);
+    const bz = tz + bendAt(t, Math.abs(bx) > L / 2);
     const by = Math.max(0.11, (ba[2] + (bb[2] - ba[2]) * u) / 10 + 0.11);
     ball.position.set(bx, by, bz);
+    holdOnLine(t);
     const moved = ball.position.distanceTo(ballPrev);
     if (moved > 0 && moved < 5) {
       const axis = new THREE.Vector3(bz - ballPrev.z, 0, -(bx - ballPrev.x)).normalize();
@@ -442,6 +498,7 @@ export async function createShow({
       });
     }
     attachBall(t);
+    holdOnLine(t); // a dribble rolled out ahead of a player on the line stays out too
   }
 
   const spot = new THREE.Vector3();
@@ -660,6 +717,7 @@ export async function createShow({
           ahead: dx * Math.sin(controller.heading) + dz * Math.cos(controller.heading), dist: Math.hypot(dx, dz),
         };
       }
+      out.keepers = [...keepers].map((s) => ({ slot: s, action: players[s].actionNow }));
       return out;
     },
     screenOf(slot) {
