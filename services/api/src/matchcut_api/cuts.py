@@ -175,6 +175,25 @@ class AzureCuts:
                 msg = {**req.message(cut_id), "chunk": chunk, "chunks": self.chunks}
                 self.queue.send_message(json.dumps(msg))
 
+    def request_clip(self, match: str, aspect: str, key: str, chunks: int = 4) -> None:
+        """Render a clip (a moment or a window of play) for every fan: sliced on the job, once."""
+        from azure.core.exceptions import ResourceExistsError  # noqa: PLC0415
+
+        try:  # a double tap, or two fans clipping the same play, renders it once
+            self.blobs.upload_blob(f"work/{match}/{aspect}/{key}/requested", b"", overwrite=False)
+        except ResourceExistsError:
+            return
+        for chunk in range(chunks):
+            msg = {
+                "kind": "clip",
+                "match": match,
+                "aspect": aspect,
+                "key": key,
+                "chunk": chunk,
+                "chunks": chunks,
+            }
+            self.queue.send_message(json.dumps(msg))
+
     def status(self, cut_id: str) -> dict[str, Any] | None:
         b = self.blobs.get_blob_client(f"{cut_id}.json")
         if not b.exists():
@@ -210,6 +229,7 @@ class LocalCuts:
         self.out = out_dir
         self.base, self.code = base, code
         self.pieces, self.assembler = pieces, assembler
+        self.clips: set[tuple[str, str, str]] = set()
         self.jobs: dict[str, dict[str, Any]] = {}
         self.lock = threading.Lock()
 
@@ -219,6 +239,22 @@ class LocalCuts:
             self.jobs[cut_id] = {"id": cut_id, "status": "rendering"}
         threading.Thread(target=self._run, args=(cut_id, req), daemon=True).start()
         return cut_id
+
+    def request_clip(self, match: str, aspect: str, key: str) -> None:
+        """Development: render the clip in a background process with the job's own command."""
+        with self.lock:
+            if (match, aspect, key) in self.clips:
+                return
+            self.clips.add((match, aspect, key))
+        cmd = [
+            sys.executable, "-m", "matchcut_recap.cli", "clip", "--match", match, "--aspect", aspect,
+            "--keys", key, "--base", self.base, "--out", str(self.pieces or self.out / "pieces"),
+        ]  # fmt: skip
+        env = {**os.environ, "MATCHCUT_RENDER_CODE": self.code}
+        threading.Thread(
+            target=lambda: subprocess.run(cmd, env=env, capture_output=True, check=False),  # noqa: S603
+            daemon=True,
+        ).start()
 
     def _fast(self, cut_id: str, req: CutRequest) -> bool:
         """Assemble from out/pieces if every piece is there."""

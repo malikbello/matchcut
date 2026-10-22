@@ -39,3 +39,17 @@ def test_a_pass_still_arriving_from_behind_is_not_a_dribble_error():
     r = motion_report([arriving] * 10, 25)
     assert r["carry_frames"] == 0
     assert r["pass"]
+
+
+def test_a_ball_that_snaps_between_frames_fails_and_cuts_are_forgiven():
+    def at(i, x, kind="live", t=None):
+        return {"ball": [x, 0.11, 0.0], "kind": kind, "t": i * 40 if t is None else t}
+
+    smooth = [at(i, i * 0.5) for i in range(50)]  # 12.5 m/s: a firm pass
+    assert motion_report(smooth, 25)["ball_jumps"] == 0
+    snaps = [at(i, i * 0.5 + (3.0 if i in (10, 20, 30) else 0.0)) for i in range(50)]
+    r = motion_report(snaps, 25)
+    assert r["ball_jumps"] >= 3
+    assert not r["pass"]
+    cut = [at(0, 0.0), at(1, 40.0, t=900_000)]  # a cut to other play is not a jump
+    assert motion_report(cut, 25)["ball_jumps"] == 0

@@ -14,7 +14,9 @@ from matchcut_editing.edl import (
     frames,
     moment_cut,
     pick_moments,
+    segments_for,
     slug,
+    window_key,
 )
 from matchcut_editing.mix import mix_command
 
@@ -298,3 +300,16 @@ def test_the_call_owns_the_goal_and_the_analysis_owns_the_replay():
         sum(s.duration for s in cut.segments[:i]) for i, s in enumerate(cut.segments) if s.kind == "package"
     )
     assert placed[0].at >= package_at  # voiced over the replay, not on top of the goal call
+
+
+def test_any_stretch_of_play_is_a_clip_with_its_own_sound():
+    key = window_key(990_000, 1_001_500)
+    assert key == "window-990000-1001500"
+    segs = segments_for(key, PACKAGES)
+    assert len(segs) == 1
+    assert segs[0].duration == 11.5
+    one = moment_cut(
+        FEED, CUES, CALLS, key, language="en", aspect="9x16", package_durations=PACKAGES, clip_durations={}
+    )
+    assert one.clip_order() == [key]
+    assert any(e.role == "call" for e in one.audio)  # the calls inside the window are voiced

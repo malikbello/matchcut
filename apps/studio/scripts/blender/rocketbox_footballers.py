@@ -350,8 +350,44 @@ REF_REST_ROT = {
     k: (Wr @ ref.data.bones[sname(k)].matrix_local).to_3x3() for k in MAP if sname(k) in ref.data.bones
 }
 REF_HIP_REST = Wr @ ref.data.bones[sname("Hips")].head_local
+
+# Match the rest poses before transferring motion. Mixamo rests in a T-pose (arms out level),
+# Rocketbox in an A-pose (arms 45 degrees down): a motion measured from the T-pose and applied to
+# the A-pose overshoots by the difference (arms end up behind the back). For every bone, the
+# direction to its child joint is measured on both skeletons at rest, and the target's rest is
+# swung onto the source's before any motion is applied.
+SEGMENTS = {"Hips": "Spine", "Spine": "Spine1", "Spine1": "Spine2", "Spine2": "Neck", "Neck": "Head"}
+for side in ("Left", "Right"):
+    SEGMENTS |= {
+        f"{side}Shoulder": f"{side}Arm",
+        f"{side}Arm": f"{side}ForeArm",
+        f"{side}ForeArm": f"{side}Hand",
+        f"{side}Hand": f"{side}HandMiddle1",
+        f"{side}UpLeg": f"{side}Leg",
+        f"{side}Leg": f"{side}Foot",
+        f"{side}Foot": f"{side}ToeBase",
+    }
+REF_HEAD = {k: Wr @ ref.data.bones[sname(k)].head_local for k in MAP if sname(k) in ref.data.bones}
 for o in ref_objs:
     bpy.data.objects.remove(o, do_unlink=True)
+
+
+def tgt_head(k: str) -> Vector:
+    return Wt @ bones_t[MAP[k]].head_local
+
+
+REST_SWING: dict[str, Matrix] = {}
+for k, child in SEGMENTS.items():
+    if k not in REF_HEAD or child not in REF_HEAD or MAP.get(child) not in bones_t:
+        continue
+    d_src = (REF_HEAD[child] - REF_HEAD[k]).normalized()
+    d_tgt = (tgt_head(child) - tgt_head(k)).normalized()
+    swing = d_tgt.rotation_difference(d_src).to_matrix()
+    REST_SWING[MAP[k]] = swing
+    angle = math.degrees(d_tgt.angle(d_src))
+    if angle > 5:
+        print(f"rest match {MAP[k]}: {angle:.0f} deg")
+tgt_rest_matched = {n: REST_SWING.get(n, Matrix.Identity(3)) @ r for n, r in tgt_rest_world_rot.items()}
 
 
 def bake(src: bpy.types.Object, action_src: bpy.types.Action, name: str) -> bpy.types.Action:
@@ -384,7 +420,7 @@ def bake(src: bpy.types.Object, action_src: bpy.types.Action, name: str) -> bpy.
             if k is not None:
                 sp = src.pose.bones[sname(k)]
                 delta = (Ws @ sp.matrix).to_3x3() @ REF_REST_ROT[k].inverted()
-                rot_arm = (Wt_inv.to_3x3() @ (delta @ tgt_rest_world_rot[bone.name])).normalized()
+                rot_arm = (Wt_inv.to_3x3() @ (delta @ tgt_rest_matched[bone.name])).normalized()
                 loc = default.to_translation()
                 if bone.name == "Bip01 Pelvis":
                     loc = Wt_inv @ (tgt_hip_rest + ((Ws @ sp.head) - REF_HIP_REST) * scale)
