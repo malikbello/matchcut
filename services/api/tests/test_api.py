@@ -5,7 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 from matchcut_api import Settings, create_app
 from matchcut_api.app import sha256
-from matchcut_api.cuts import Film, progress
+from matchcut_api.cuts import CutRequest, Film, LocalCuts, progress
 from matchcut_contracts import Cue, CueStatus, MomentKind
 
 CODE = "kickoff-2026"
@@ -271,3 +271,62 @@ def test_a_queued_cut_reports_progress_from_its_slices():
     names = ["c-0123456789ab/claim-00", "c-0123456789ab/claim-01", "c-0123456789ab/part-00.mp4"]
     assert progress(st, names) | {} == {**st, "status": "rendering", "rendered": 1}
     assert progress(st, [*names, "c-0123456789ab/assemble"])["status"] == "assembling"
+
+
+# ---------------------------------------------------------------- assembling cuts from pieces
+
+
+class _PieceCut:
+    language = "en"
+
+    def clip_order(self):
+        return ["title-kestrel-bay-fc", "goal-3274800", "end"]
+
+    def as_dict(self):
+        return {"segments": []}
+
+
+class _FakeAssembler:
+    def __init__(self):
+        self.joined = None
+
+    def plan(self, req, manifest):
+        return _PieceCut()
+
+    def make(self, cut, pieces, work):
+        self.joined = [p.name for p in pieces]
+        work.mkdir(parents=True, exist_ok=True)
+        film = work / "film.mp4"
+        film.write_bytes(b"film")
+        return film
+
+
+def _pieces(tmp_path, names):
+    folder = tmp_path / "pieces" / MATCH / "9x16"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text('{"fps": 25, "packages": {}, "clips": {}}', encoding="utf-8")
+    for n in names:
+        (folder / n).write_bytes(b"piece")
+    return tmp_path / "pieces"
+
+
+def test_a_cut_is_assembled_from_its_pieces_in_order(tmp_path):
+    names = ["title-kestrel-bay-fc.en.mp4", "goal-3274800.en.mp4", "end.en.mp4"]
+    asm = _FakeAssembler()
+    store = LocalCuts(tmp_path / "cuts", "http://127.0.0.1:1", "x", _pieces(tmp_path, names), asm)
+    req = CutRequest(MATCH, "en", "9x16", side="home")
+    assert store._fast("c-0123456789ab", req)
+    assert asm.joined == names
+    st = store.status("c-0123456789ab")
+    film = store.film("c-0123456789ab")
+    assert st is not None
+    assert film is not None
+    assert st["status"] == "done"
+    assert st["assembled"] is True
+    assert film.size == 4
+
+
+def test_a_missing_piece_means_the_film_is_rendered_instead(tmp_path):
+    pieces = _pieces(tmp_path, ["title-kestrel-bay-fc.en.mp4", "end.en.mp4"])  # the goal clip is not ready
+    store = LocalCuts(tmp_path / "cuts", "http://127.0.0.1:1", "x", pieces, _FakeAssembler())
+    assert not store._fast("c-0123456789ab", CutRequest(MATCH, "en", "9x16", side="home"))

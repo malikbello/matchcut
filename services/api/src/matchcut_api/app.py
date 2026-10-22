@@ -22,6 +22,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import time
 from collections import defaultdict
 from collections.abc import AsyncIterator
@@ -39,7 +40,16 @@ from pydantic import BaseModel, Field
 from sse_starlette.sse import EventSourceResponse
 from starlette.middleware.sessions import SessionMiddleware
 
-from matchcut_api.cuts import ASPECTS, CUT_ID, CUT_LANGUAGES, AzureCuts, CutRequest, CutStore, LocalCuts
+from matchcut_api.cuts import (
+    ASPECTS,
+    CUT_ID,
+    CUT_LANGUAGES,
+    Assembler,
+    AzureCuts,
+    CutRequest,
+    CutStore,
+    LocalCuts,
+)
 
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")  # BCP 47: en, en-NG, pcm, ar, yo
@@ -71,6 +81,8 @@ class Settings:
     storage_account: str | None = None  # Azure: fan cuts via the queue-triggered render job
     render_code: str | None = None  # local development: the code the background renderer signs in with
     cuts_dir: Path = Path("out/cuts")
+    data_dir: Path = Path("out")  # feeds/, insights/, calls/, media/ (assembling cuts from pieces)
+    pieces_dir: Path = Path("out/pieces")  # local development: the job's pieces
     port: int = 8080
     cuts_per_hour: int = 6
     cut_chunks: int = 10  # slices rendered in parallel per cut on Azure
@@ -91,6 +103,8 @@ class Settings:
             storage_account=os.environ.get("MATCHCUT_STORAGE_ACCOUNT") or None,
             render_code=os.environ.get("MATCHCUT_RENDER_CODE") or None,
             cuts_dir=Path(os.environ.get("MATCHCUT_CUTS_DIR", "out/cuts")),
+            data_dir=Path(os.environ.get("MATCHCUT_DATA", "out")),
+            pieces_dir=Path(os.environ.get("MATCHCUT_PIECES_DIR", "out/pieces")),
             port=int(os.environ.get("PORT", "8080")),
             cut_chunks=int(os.environ.get("MATCHCUT_CUT_CHUNKS", "10")),
         )
@@ -290,11 +304,13 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
         )
 
     # ---------------------------------------------------------------- fan cuts
+    crowd = (s.studio_dir or Path("apps/studio")) / "assets" / "audio" / "crowd"
+    assembler = Assembler(s.data_dir, crowd, shutil.which("ffmpeg") or "ffmpeg")
     store = cuts
     if store is None and s.storage_account:
-        store = AzureCuts(s.storage_account, s.cut_chunks)
+        store = AzureCuts(s.storage_account, s.cut_chunks, assembler)
     elif store is None and s.render_code:
-        store = LocalCuts(s.cuts_dir, f"http://127.0.0.1:{s.port}", s.render_code)
+        store = LocalCuts(s.cuts_dir, f"http://127.0.0.1:{s.port}", s.render_code, s.pieces_dir, assembler)
     per_hour = parse(f"{s.cuts_per_hour}/hour")
 
     def players_of(match_id: str) -> set[str]:

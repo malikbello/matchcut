@@ -13,6 +13,7 @@ members = [
     "matchcut-analytics",
     "matchcut-api",
     "matchcut-contracts",
+    "matchcut-editing",
     "matchcut-insights",
     "matchcut-memory",
     "matchcut-recap",
@@ -1518,6 +1519,7 @@ dev = [
     { name = "matchcut-analytics" },
     { name = "matchcut-api" },
     { name = "matchcut-contracts" },
+    { name = "matchcut-editing" },
     { name = "matchcut-insights" },
     { name = "matchcut-memory" },
     { name = "matchcut-recap" },
@@ -1539,6 +1541,7 @@ dev = [
     { name = "matchcut-analytics", editable = "packages/analytics" },
     { name = "matchcut-api", editable = "services/api" },
     { name = "matchcut-contracts", editable = "packages/contracts" },
+    { name = "matchcut-editing", editable = "packages/editing" },
     { name = "matchcut-insights", editable = "services/insights" },
     { name = "matchcut-memory", editable = "services/league-memory" },
     { name = "matchcut-recap", editable = "services/recap" },
@@ -1577,6 +1580,7 @@ dependencies = [
     { name = "itsdangerous" },
     { name = "limits" },
     { name = "matchcut-contracts" },
+    { name = "matchcut-editing" },
     { name = "sse-starlette" },
     { name = "uvicorn" },
 ]
@@ -1590,6 +1594,7 @@ requires-dist = [
     { name = "itsdangerous", specifier = ">=2.2" },
     { name = "limits", specifier = ">=5.0" },
     { name = "matchcut-contracts", editable = "packages/contracts" },
+    { name = "matchcut-editing", editable = "packages/editing" },
     { name = "sse-starlette", specifier = ">=3.0" },
     { name = "uvicorn", specifier = ">=0.40" },
 ]
@@ -1604,6 +1609,11 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "pydantic", specifier = ">=2.9,<3" }]
+
+[[package]]
+name = "matchcut-editing"
+version = "0.1.0"
+source = { editable = "packages/editing" }
 
 [[package]]
 name = "matchcut-insights"
@@ -1665,6 +1675,7 @@ dependencies = [
     { name = "httpx" },
     { name = "matchcut-api" },
     { name = "matchcut-contracts" },
+    { name = "matchcut-editing" },
     { name = "playwright" },
 ]
 
@@ -1676,6 +1687,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28" },
     { name = "matchcut-api", editable = "services/api" },
     { name = "matchcut-contracts", editable = "packages/contracts" },
+    { name = "matchcut-editing", editable = "packages/editing" },
     { name = "playwright", specifier = ">=1.48" },
 ]
 

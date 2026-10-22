@@ -18,6 +18,7 @@ publishes the film. Every Azure call uses the job's managed identity: no keys an
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -28,6 +29,7 @@ import time
 import urllib.request
 from argparse import Namespace
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -83,14 +85,25 @@ def make_args(req: dict[str, Any], out: Path) -> Namespace:
     )
 
 
-def _parts_missing(blobs: Any, cut_id: str, chunks: int) -> list[int]:
-    have = {b.name for b in blobs.list_blobs(name_starts_with=f"{cut_id}/part-")}
-    return [i for i in range(chunks) if f"{cut_id}/part-{i:02d}.mp4" not in have]
+@dataclass
+class Work:
+    """A piece of sliced work: a film, or a moment clip. Replicas render slices in parallel;
+    the one that completes the set finishes it (joins, captions, publishes) exactly once."""
+
+    unit: str  # blob prefix for this work's markers and slices
+    chunks: int
+    published: Callable[[], bool]  # the finished output exists: late replicas must not touch it
+    render_part: Callable[[int], Path]  # render slice i on this replica
+    finish: Callable[[list[Path]], None]  # join the slices and publish
 
 
-def _published(blobs: Any, cut_id: str) -> bool:
-    """The film is out: a slow original or a backup that finishes later must not touch it."""
-    return any(b.name == f"{cut_id}.mp4" for b in blobs.list_blobs(name_starts_with=f"{cut_id}.mp4"))
+def _parts_missing(blobs: Any, unit: str, chunks: int) -> list[int]:
+    have = {b.name for b in blobs.list_blobs(name_starts_with=f"{unit}/part-")}
+    return [i for i in range(chunks) if f"{unit}/part-{i:02d}.mp4" not in have]
+
+
+def _exists(blobs: Any, name: str) -> bool:
+    return any(b.name == name for b in blobs.list_blobs(name_starts_with=name))
 
 
 def _claim(blobs: Any, name: str) -> bool:
@@ -104,69 +117,166 @@ def _claim(blobs: Any, name: str) -> bool:
     return True
 
 
+def run_sliced(
+    blobs: Any,
+    work: Work,
+    chunk: int,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Render this replica's slice, back up a straggler when the work is nearly done, and
+    finish the work if this replica completes it."""
+    unit, chunks = work.unit, work.chunks
+    if work.published():
+        return  # a backup already finished it
+    blobs.upload_blob(f"{unit}/claim-{chunk:02d}", b"", overwrite=True)
+    started = clock()
+    part = work.render_part(chunk)
+    if work.published():
+        return
+    with part.open("rb") as f:
+        blobs.upload_blob(f"{unit}/part-{chunk:02d}.mp4", f, overwrite=True)
+    took = clock() - started
+    # Backup tasks, as MapReduce runs them: once only the tail is left, one finished replica
+    # watches each missing slice and renders it too if it runs HEDGE times longer than this one
+    # did. A slow host or a lost replica then costs minutes, not the queue's hour.
+    while missing := _parts_missing(blobs, unit, chunks):
+        if len(missing) > max(1, chunks // TAIL_SHARE):
+            return  # most slices are still in flight: nothing is late yet
+        target = next((i for i in missing if _claim(blobs, f"{unit}/watch-{i:02d}")), None)
+        if target is None:
+            return  # every late slice already has a watcher
+        deadline = started + HEDGE * took
+        while clock() < deadline and target in _parts_missing(blobs, unit, chunks):
+            sleep(10)
+        if target in _parts_missing(blobs, unit, chunks):
+            backup = work.render_part(target)
+            if work.published():
+                return
+            with backup.open("rb") as f:
+                blobs.upload_blob(f"{unit}/part-{target:02d}.mp4", f, overwrite=True)
+    if work.published() or not _claim(blobs, f"{unit}/assemble"):
+        return  # exactly one replica finishes, even when several complete together
+    parts = []
+    for i in range(chunks):
+        local = SCRATCH / f"{unit.replace('/', '_')}-part-{i:02d}.mp4"
+        with local.open("wb") as f:
+            blobs.download_blob(f"{unit}/part-{i:02d}.mp4").readinto(f)
+        parts.append(local)
+    work.finish(parts)
+    for name in [b.name for b in blobs.list_blobs(name_starts_with=f"{unit}/")]:
+        blobs.delete_blob(name)
+
+
 def render_slice(
     blobs: Any,
     req: dict[str, Any],
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
 ) -> None:
-    """Render this message's slice, back up a straggler if the cut is nearly done, and
-    assemble the film if this replica completes it."""
-    from matchcut_recap.cli import make_part  # noqa: PLC0415
+    """A fan's whole film rendered frame by frame (the fallback when its pieces are not ready)."""
+    from matchcut_recap.cli import assemble, make_part  # noqa: PLC0415
 
-    cut_id, chunk, chunks = req["id"], int(req.get("chunk", 0)), int(req.get("chunks", 1))
-    if _published(blobs, cut_id):
-        return  # a backup already finished this cut
-    blobs.upload_blob(f"{cut_id}/claim-{chunk:02d}", b"", overwrite=True)
-    started = clock()
-    cut, part = make_part(make_args(req, SCRATCH))
-    if _published(blobs, cut_id):
-        return
-    with part.open("rb") as f:
-        blobs.upload_blob(f"{cut_id}/part-{chunk:02d}.mp4", f, overwrite=True)
-    took = clock() - started
-    # Backup tasks, as MapReduce runs them: once only the tail of the cut is left, one finished
-    # replica watches each missing slice and renders it too if it runs HEDGE times longer than
-    # this one did. A slow host or a lost replica then costs minutes, not the queue's hour.
-    while missing := _parts_missing(blobs, cut_id, chunks):
-        if len(missing) > max(1, chunks // TAIL_SHARE):
-            return  # most slices are still in flight: nothing is late yet
-        target = next((i for i in missing if _claim(blobs, f"{cut_id}/watch-{i:02d}")), None)
-        if target is None:
-            return  # every late slice already has a watcher
-        deadline = started + HEDGE * took
-        while clock() < deadline and target in _parts_missing(blobs, cut_id, chunks):
-            sleep(10)
-        if target in _parts_missing(blobs, cut_id, chunks):
-            _, backup = make_part(make_args({**req, "chunk": target}, SCRATCH))
-            if _published(blobs, cut_id):
-                return
-            with backup.open("rb") as f:
-                blobs.upload_blob(f"{cut_id}/part-{target:02d}.mp4", f, overwrite=True)
-    _assemble(blobs, req, cut)
+    cut_id = req["id"]
+    planned: dict[str, Any] = {}
+
+    def render_part(i: int) -> Path:
+        cut, part = make_part(make_args({**req, "chunk": i}, SCRATCH))
+        planned["cut"] = cut
+        return part
+
+    def finish(parts: list[Path]) -> None:
+        cut = planned["cut"]
+        film = assemble(make_args(req, SCRATCH), cut, parts)
+        with film.open("rb") as f:
+            blobs.upload_blob(f"{cut_id}.mp4", f, overwrite=True)
+        plan = json.dumps(cut.as_dict(), ensure_ascii=False).encode()
+        blobs.upload_blob(f"{cut_id}.edl.json", plan, overwrite=True)
+        _status(blobs, cut_id, status="done", finished=time.time(), film=f"{cut_id}.mp4")
+
+    work = Work(
+        unit=cut_id,
+        chunks=int(req.get("chunks", 1)),
+        published=lambda: _exists(blobs, f"{cut_id}.mp4"),
+        render_part=render_part,
+        finish=finish,
+    )
+    run_sliced(blobs, work, int(req.get("chunk", 0)), clock, sleep)
 
 
-def _assemble(blobs: Any, req: dict[str, Any], cut: Any) -> None:
-    """Join the slices and publish the film; exactly one replica does it."""
-    from matchcut_recap.cli import assemble  # noqa: PLC0415
+def piece_blob(match: str, aspect: str, name: str) -> str:
+    return f"pieces/{match}/{aspect}/{name}"
 
-    cut_id, chunks = req["id"], int(req.get("chunks", 1))
-    if _published(blobs, cut_id) or not _claim(blobs, f"{cut_id}/assemble"):
-        return
-    parts = []
-    for i in range(chunks):
-        local = SCRATCH / f"part-{i:02d}.mp4"
-        with local.open("wb") as f:
-            blobs.download_blob(f"{cut_id}/part-{i:02d}.mp4").readinto(f)
-        parts.append(local)
-    film = assemble(make_args(req, SCRATCH), cut, parts)
-    with film.open("rb") as f:
-        blobs.upload_blob(f"{cut_id}.mp4", f, overwrite=True)
-    plan = json.dumps(cut.as_dict(), ensure_ascii=False).encode()
-    blobs.upload_blob(f"{cut_id}.edl.json", plan, overwrite=True)
-    _status(blobs, cut_id, status="done", finished=time.time(), film=f"{cut_id}.mp4")
-    for name in [b.name for b in blobs.list_blobs(name_starts_with=f"{cut_id}/")]:
-        blobs.delete_blob(name)
+
+def render_clip(blobs: Any, req: dict[str, Any]) -> None:
+    """A moment clip, rendered once for every fan: sliced like films, then captioned in every
+    voiced language and published with its poster frame, and the match manifest updated."""
+    from matchcut_editing.edl import clip_plan  # noqa: PLC0415
+    from matchcut_editing.inputs import VOICED, best_cues  # noqa: PLC0415
+
+    from matchcut_recap.cli import write_manifest  # noqa: PLC0415
+    from matchcut_recap.clips import finish_clip, render_clip_part  # noqa: PLC0415
+    from matchcut_recap.render import Studio  # noqa: PLC0415
+
+    match, aspect, key = req["match"], req["aspect"], req["key"]
+    a = make_args(req, SCRATCH)
+    data = Path(a.data)
+    code = os.environ["MATCHCUT_RENDER_CODE"]
+    feed = json.loads(gzip.decompress((data / "feeds" / f"{match}.json.gz").read_bytes()))
+    cues = best_cues(data / "insights" / f"{match}.jsonl", "en")
+
+    def studio() -> Studio:
+        return Studio(a.base, code, match, "en", aspect, gpu_less=True)
+
+    def plan_with(st: Studio) -> dict[str, list]:
+        packages = {g["t"]: st.package_duration(g["t"]) for g in feed.get("goals", [])}
+        plan = clip_plan(feed, cues, packages)
+        manifest = write_manifest(SCRATCH, packages, plan, a.fps)
+        blobs.upload_blob(piece_blob(match, aspect, "manifest.json"), manifest.read_bytes(), overwrite=True)
+        return plan
+
+    def render_part(i: int) -> Path:
+        with studio() as st:
+            plan = plan_with(st)
+            return render_clip_part(
+                st, plan[key], a.fps, i, int(req.get("chunks", 1)), SCRATCH / f"{key}-{i:02d}.mp4"
+            )
+
+    def finish(parts: list[Path]) -> None:
+        with studio() as st:
+            plan = plan_with(st)
+            pieces = finish_clip(st, key, plan[key], parts, data, match, VOICED, SCRATCH)
+        for lang, path in pieces.items():
+            name = f"{key}.jpg" if lang == "poster" else f"{key}.{lang}.mp4"
+            with path.open("rb") as f:
+                blobs.upload_blob(piece_blob(match, aspect, name), f, overwrite=True)
+
+    work = Work(
+        unit=f"work/{match}/{aspect}/{key}",
+        chunks=int(req.get("chunks", 1)),
+        published=lambda: _exists(blobs, piece_blob(match, aspect, f"{key}.en.mp4")),
+        render_part=render_part,
+        finish=finish,
+    )
+    run_sliced(blobs, work, int(req.get("chunk", 0)))
+
+
+def render_card_set(blobs: Any, req: dict[str, Any]) -> None:
+    """Title cards for every focus and the end card, in one language."""
+    from matchcut_editing.inputs import focuses  # noqa: PLC0415
+
+    from matchcut_recap.clips import render_cards  # noqa: PLC0415
+    from matchcut_recap.render import Studio  # noqa: PLC0415
+
+    match, aspect, lang = req["match"], req["aspect"], req["lang"]
+    a = make_args(req, SCRATCH)
+    data = Path(a.data)
+    feed = json.loads(gzip.decompress((data / "feeds" / f"{match}.json.gz").read_bytes()))
+    with Studio(a.base, os.environ["MATCHCUT_RENDER_CODE"], match, lang, aspect, gpu_less=True) as st:
+        made = render_cards(st, data, match, focuses(feed), [lang], SCRATCH)
+    for name, path in made.items():
+        with path.open("rb") as f:
+            blobs.upload_blob(piece_blob(match, aspect, f"{name}.mp4"), f, overwrite=True)
 
 
 def main() -> None:
@@ -189,10 +299,12 @@ def main() -> None:
     api = _start_api(code)
     try:
         os.environ["MATCHCUT_RENDER_CODE"] = code
-        render_slice(blobs, req)
+        kind = req.get("kind", "cut")
+        {"cut": render_slice, "clip": render_clip, "cards": render_card_set}[kind](blobs, req)
         queue.delete_message(msg)
     except Exception as exc:
-        _status(blobs, req["id"], status="failed", error=f"{type(exc).__name__}: {exc}"[:300])
+        if req.get("kind", "cut") == "cut":
+            _status(blobs, req["id"], status="failed", error=f"{type(exc).__name__}: {exc}"[:300])
         queue.delete_message(msg)  # a broken request is reported, not retried forever
         raise
     finally:

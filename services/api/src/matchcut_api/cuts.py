@@ -1,10 +1,16 @@
 """Fan cuts: request a personal highlight film, follow it, watch it.
 
+The fast path, when the match's pieces exist (moment clips captioned in every language, title
+and end cards, all rendered once by the job): the API plans the fan's cut, joins its pieces
+without re-encoding and mixes the soundtrack in their language. Seconds, not a render.
+The fallback, when a piece is missing: the whole film is rendered frame by frame, sliced across
+the job's replicas.
+
 Two back ends behind one interface:
-- Azure (MATCHCUT_STORAGE_ACCOUNT set): the request goes on the `cuts` Storage Queue, which
-  starts the render job (Container Apps Job, KEDA queue trigger); status and film are read
-  from the `cuts` blob container. Managed identity throughout: no keys.
-- Local development: the renderer runs as a background process and writes to out/cuts.
+- Azure (MATCHCUT_STORAGE_ACCOUNT set): pieces, status and films live in the `cuts` blob
+  container; the fallback goes on the `cuts` Storage Queue, which starts the render job
+  (Container Apps Job, KEDA queue trigger). Managed identity throughout: no keys.
+- Local development: pieces in out/pieces; the fallback renderer runs as a background process.
 """
 
 from __future__ import annotations
@@ -15,7 +21,9 @@ import re
 import secrets
 import subprocess
 import sys
+import tempfile
 import threading
+import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +62,37 @@ class Film:
     read: Callable[[int, int], Iterator[bytes]]
 
 
+class CutAssembler(Protocol):
+    def plan(self, req: CutRequest, manifest: dict[str, Any]) -> Any: ...
+    def make(self, cut: Any, pieces: list[Path], work: Path) -> Path: ...
+
+
+@dataclass
+class Assembler:
+    """Plans a fan's cut and makes it from stored pieces (matchcut_editing.assembly)."""
+
+    data: Path  # feeds/, insights/, calls/, media/
+    crowd: Path  # the crowd stems
+    ffmpeg: str = "ffmpeg"
+
+    def plan(self, req: CutRequest, manifest: dict[str, Any]) -> Any:
+        from matchcut_editing.assembly import fan_cut  # noqa: PLC0415
+
+        focus = {"player": req.player} if req.player else {"side": req.side or "home"}
+        return fan_cut(self.data, req.match, focus, req.lang, req.aspect, manifest)
+
+    def make(self, cut: Any, pieces: list[Path], work: Path) -> Path:
+        from matchcut_editing.assembly import assemble_cut  # noqa: PLC0415
+
+        return assemble_cut(cut, pieces, self.data / "media", self.crowd, work, self.ffmpeg)
+
+
+def pieces_needed(cut: Any) -> list[str]:
+    from matchcut_editing.assembly import piece_files  # noqa: PLC0415
+
+    return piece_files(cut)
+
+
 class CutStore(Protocol):
     def submit(self, req: CutRequest) -> str: ...
     def status(self, cut_id: str) -> dict[str, Any] | None: ...
@@ -77,8 +116,9 @@ def new_id() -> str:
 class AzureCuts:
     """One queue message per slice of the film; the render job's replicas take them in parallel."""
 
-    def __init__(self, account: str, chunks: int = 10):
+    def __init__(self, account: str, chunks: int = 10, assembler: CutAssembler | None = None):
         self.chunks = chunks
+        self.assembler = assembler
         from azure.identity import DefaultAzureCredential  # noqa: PLC0415 - only in Azure
         from azure.storage.blob import BlobServiceClient  # noqa: PLC0415
         from azure.storage.queue import QueueClient  # noqa: PLC0415
@@ -91,12 +131,49 @@ class AzureCuts:
 
     def submit(self, req: CutRequest) -> str:
         cut_id = new_id()
-        status = {"id": cut_id, "status": "queued", "chunks": self.chunks}
-        self.blobs.upload_blob(f"{cut_id}.json", json.dumps(status).encode(), overwrite=True)
-        for chunk in range(self.chunks):
-            msg = {**req.message(cut_id), "chunk": chunk, "chunks": self.chunks}
-            self.queue.send_message(json.dumps(msg))
+        self._status(cut_id, status="queued", chunks=self.chunks)
+        threading.Thread(target=self._make, args=(cut_id, req), daemon=True).start()
         return cut_id
+
+    def _status(self, cut_id: str, **fields: Any) -> None:
+        self.blobs.upload_blob(
+            f"{cut_id}.json", json.dumps({"id": cut_id, **fields}).encode(), overwrite=True
+        )
+
+    def _make(self, cut_id: str, req: CutRequest) -> None:
+        """Assemble from the match's pieces if they are all there; otherwise render the film."""
+        started = time.monotonic()
+        prefix = f"pieces/{req.match}/{req.aspect}/"
+        try:
+            if self.assembler is None:
+                raise LookupError("no assembler")
+            manifest = json.loads(self.blobs.download_blob(f"{prefix}manifest.json").readall())
+            cut = self.assembler.plan(req, manifest)
+            needed = pieces_needed(cut)
+            have = {b.name for b in self.blobs.list_blobs(name_starts_with=prefix)}
+            if any(prefix + n not in have for n in needed):
+                raise LookupError("pieces missing")
+            self._status(cut_id, status="assembling")
+            with tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                local = []
+                for n in needed:
+                    path = work / n
+                    with path.open("wb") as f:
+                        self.blobs.download_blob(prefix + n).readinto(f)
+                    local.append(path)
+                film = self.assembler.make(cut, local, work / "out")
+                with film.open("rb") as f:
+                    self.blobs.upload_blob(f"{cut_id}.mp4", f, overwrite=True)
+            plan = json.dumps(cut.as_dict(), ensure_ascii=False).encode()
+            self.blobs.upload_blob(f"{cut_id}.edl.json", plan, overwrite=True)
+            took = round(time.monotonic() - started, 1)
+            self._status(cut_id, status="done", film=f"{cut_id}.mp4", assembled=True, seconds=took)
+        except Exception:
+            self._status(cut_id, status="queued", chunks=self.chunks)
+            for chunk in range(self.chunks):
+                msg = {**req.message(cut_id), "chunk": chunk, "chunks": self.chunks}
+                self.queue.send_message(json.dumps(msg))
 
     def status(self, cut_id: str) -> dict[str, Any] | None:
         b = self.blobs.get_blob_client(f"{cut_id}.json")
@@ -122,9 +199,17 @@ class AzureCuts:
 class LocalCuts:
     """Development: render in a background process with the same CLI the job uses."""
 
-    def __init__(self, out_dir: Path, base: str, code: str):
+    def __init__(
+        self,
+        out_dir: Path,
+        base: str,
+        code: str,
+        pieces: Path | None = None,
+        assembler: CutAssembler | None = None,
+    ):
         self.out = out_dir
         self.base, self.code = base, code
+        self.pieces, self.assembler = pieces, assembler
         self.jobs: dict[str, dict[str, Any]] = {}
         self.lock = threading.Lock()
 
@@ -135,7 +220,35 @@ class LocalCuts:
         threading.Thread(target=self._run, args=(cut_id, req), daemon=True).start()
         return cut_id
 
+    def _fast(self, cut_id: str, req: CutRequest) -> bool:
+        """Assemble from out/pieces if every piece is there."""
+        if self.pieces is None or self.assembler is None:
+            return False
+        folder = self.pieces / req.match / req.aspect
+        manifest_path = folder / "manifest.json"
+        if not manifest_path.is_file():
+            return False
+        started = time.monotonic()
+        cut = self.assembler.plan(req, json.loads(manifest_path.read_text(encoding="utf-8")))
+        local = [folder / n for n in pieces_needed(cut)]
+        if not all(p.is_file() for p in local):
+            return False
+        with self.lock:
+            self.jobs[cut_id] = {"id": cut_id, "status": "assembling"}
+        film = self.assembler.make(cut, local, self.out / cut_id)
+        with self.lock:
+            self.jobs[cut_id] = {
+                "id": cut_id, "status": "done", "film": film.name, "assembled": True,
+                "seconds": round(time.monotonic() - started, 1),
+            }  # fmt: skip
+        return True
+
     def _run(self, cut_id: str, req: CutRequest) -> None:
+        try:
+            if self._fast(cut_id, req):
+                return
+        except Exception:  # noqa: S110 - a gap in the pieces means the film is rendered instead
+            pass
         folder = self.out / cut_id
         cmd = [
             sys.executable,

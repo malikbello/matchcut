@@ -238,7 +238,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = if (deployApps) {
         {
           name: 'studio'
           image: '${registry.properties.loginServer}/matchcut-api:${apiImageTag}'
-          resources: { cpu: json('0.5'), memory: '1Gi' }
+          resources: { cpu: json('1'), memory: '2Gi' } // assembles fan cuts: a join and a sound mix
           env: concat(commonEnv, [
             { name: 'MATCHCUT_ACCESS_CODE_SHA256', secretRef: 'access-code-sha256' }
             { name: 'MATCHCUT_SESSION_SECRET', secretRef: 'session-secret' }

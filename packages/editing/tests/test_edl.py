@@ -1,8 +1,22 @@
 import itertools
 from pathlib import Path
 
-from matchcut_recap.edl import END_S, MAX_FILM_S, RUN_UP_S, TITLE_S, build_cut, frames, pick_moments
-from matchcut_recap.mix import mix_command
+from matchcut_editing.edl import (
+    END_S,
+    MAX_FILM_S,
+    RUN_UP_S,
+    TITLE_S,
+    Segment,
+    build_cut,
+    clip_captions,
+    clip_frames,
+    clip_plan,
+    frames,
+    moment_cut,
+    pick_moments,
+    slug,
+)
+from matchcut_editing.mix import mix_command
 
 FEED = {
     "match_id": "kes-wcr-7",
@@ -195,3 +209,92 @@ def test_every_frame_names_its_caption_so_slices_render_alone():
     for a, b in itertools.pairwise(specs):
         if a["cue"] and a["cue"] == b["cue"]:
             assert abs(b["cueAge"] - a["cueAge"] - 1 / 25) < 1e-3
+
+
+# ---------------------------------------------------------------- reusable clips
+
+
+def _cut(focus):
+    return build_cut(
+        FEED, CUES, CALLS, focus=focus, language="en", aspect="9x16",
+        package_durations=PACKAGES, clip_durations={},
+    )  # fmt: skip
+
+
+def test_every_cut_is_exactly_its_clips_joined():
+    plan = clip_plan(FEED, CUES, PACKAGES)
+    for focus in ({"side": "home"}, {"side": "away"}, {"player": "Quinouani"}, {"player": "Obeiuwa"}):
+        cut = _cut(focus)
+        order = cut.clip_order()
+        assert order[0].startswith("title-")
+        assert order[-1] == "end"
+        moments = [s for s in cut.segments if s.kind != "card"]
+        from_plan = [seg for key in order[1:-1] for seg in plan[key]]
+        assert moments == from_plan  # same segments, same timings: the cut is the clips joined
+
+
+def test_frame_counts_add_up_so_joined_clips_match_the_plan():
+    plan = clip_plan(FEED, CUES, PACKAGES)
+    cut = _cut({"side": "home"})
+    card_frames = sum(round(s.duration * 25) for s in cut.segments if s.kind == "card")
+    clip_total = sum(len(clip_frames(plan[k], 25)) for k in cut.clip_order()[1:-1])
+    assert card_frames + clip_total == len(frames(cut, 25))
+    assert all(spec["cue"] is None for k in cut.clip_order()[1:-1] for spec in clip_frames(plan[k], 25))
+
+
+def test_clip_captions_are_the_cut_captions_in_clip_time():
+    plan = clip_plan(FEED, CUES, PACKAGES)
+    cut = _cut({"side": "home"})
+    at, shifted = TITLE_S, []
+    for key in cut.clip_order()[1:-1]:
+        shifted += [(a + at, b + at, m) for a, b, m in clip_captions(plan[key], CUES)]
+        at += sum(s.duration for s in plan[key])
+    assert [(round(a, 3), round(b, 3), m) for a, b, m in shifted] == [
+        (round(a, 3), round(b, 3), m) for a, b, m in cut.captions
+    ]
+
+
+def test_every_goal_has_a_goal_and_a_conceded_clip_and_titles_are_keyed_by_focus():
+    plan = clip_plan(FEED, CUES, PACKAGES)
+    for g in FEED["goals"]:
+        assert f"goal-{g['t']}" in plan
+        assert f"conceded-{g['t']}" in plan
+    assert _cut({"player": "Quinouani"}).clip_order()[0] == "title-quinouani"
+    assert slug("Kestrel Bay FC") == "kestrel-bay-fc"
+
+
+def test_a_single_moment_plays_as_its_own_film_from_the_same_clip():
+    plan = clip_plan(FEED, CUES, PACKAGES)
+    one = moment_cut(
+        FEED, CUES, CALLS, "goal-1000000", language="en", aspect="9x16",
+        package_durations=PACKAGES, clip_durations={},
+    )  # fmt: skip
+    assert one.segments == plan["goal-1000000"]  # the stored clip, nothing else: no cards
+    assert one.clip_order() == ["goal-1000000"]
+    assert any(e.role == "roar" for e in one.audio)  # the crowd erupts on the goal
+    assert one.captions  # the verified line is on screen
+
+
+def test_a_caption_that_would_flicker_never_airs_and_films_speak_one_language():
+    live = [Segment("live", 10.0, t0=0, clip="goal-8000")]
+    cues = [
+        {"t_ms": 7800, "moment_id": "MO-1", "language": "en"},  # momentum, 0.2 s before the goal
+        {"t_ms": 8000, "moment_id": "MO-2", "language": "fr"},
+        {"t_ms": 8000, "moment_id": "MO-2", "language": "en"},
+    ]
+    fr = clip_captions(live, cues, "fr")
+    assert [m for *_, m in fr] == ["MO-2"]  # the English momentum line never shows in a French film
+    en = clip_captions(live, cues, "en")
+    assert [m for *_, m in en] == ["MO-2"]  # and in English it would flash for 0.2 s: dropped
+    assert [m for *_, m in clip_captions(live, cues, "pcm")] == ["MO-2"]  # Naija films read English lines
+
+
+def test_the_call_owns_the_goal_and_the_analysis_owns_the_replay():
+    cut = _cut({"side": "home"})
+    goal_line = "audio/m/CU-00001-en.mp3"
+    placed = [e for e in cut.audio if e.file == goal_line]
+    assert len(placed) == 1
+    package_at = next(
+        sum(s.duration for s in cut.segments[:i]) for i, s in enumerate(cut.segments) if s.kind == "package"
+    )
+    assert placed[0].at >= package_at  # voiced over the replay, not on top of the goal call

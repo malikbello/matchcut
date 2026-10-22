@@ -12,7 +12,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from matchcut_recap.edl import Cut
+from matchcut_editing.edl import Cut
 
 ROARS = ["roar_1", "roar_2", "roar_3", "roar_4", "roar_5"]
 

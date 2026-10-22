@@ -280,13 +280,30 @@ function updateBug() {
 }
 
 // ------------------------------------------------------------ graphics
+// the caption card's small labels in the card's language (the words our commentary uses);
+// English stands in where a language has no entry yet (captions-only languages, ADR-0012)
+const LABELS = {
+  fr: { Goal: "But", "Big chance": "Grosse occasion", "Big save": "Grand arrêt", Momentum: "Dynamique", Pressing: "Pressing",
+    "Pressing harder": "Pressing accru", "Top speed": "Vitesse de pointe", Card: "Carton", Substitution: "Remplacement", Moment: "Moment",
+    "in 10 scored": "fois sur 10", "tries per goal": "tentatives par but", "PPDA now": "PPDA actuel", momentum: "dynamique", minute: "minute" },
+  es: { Goal: "Gol", "Big chance": "Ocasión clara", "Big save": "Gran parada", Momentum: "Impulso", Pressing: "Presión",
+    "Pressing harder": "Más presión", "Top speed": "Velocidad punta", Card: "Tarjeta", Substitution: "Cambio", Moment: "Momento",
+    "in 10 scored": "de cada 10", "tries per goal": "intentos por gol", "PPDA now": "PPDA ahora", momentum: "impulso", minute: "minuto" },
+  pt: { Goal: "Golo", "Big chance": "Grande oportunidade", "Big save": "Grande defesa", Momentum: "Ímpeto", Pressing: "Pressão",
+    "Pressing harder": "Mais pressão", "Top speed": "Velocidade máxima", Card: "Cartão", Substitution: "Substituição", Moment: "Momento",
+    "in 10 scored": "em 10", "tries per goal": "tentativas por golo", "PPDA now": "PPDA agora", momentum: "ímpeto", minute: "minuto" },
+  ar: { Goal: "هدف", "Big chance": "فرصة كبيرة", "Big save": "تصدٍّ رائع", Momentum: "الزخم", Pressing: "الضغط",
+    "Pressing harder": "ضغط أعلى", "Top speed": "السرعة القصوى", Card: "بطاقة", Substitution: "تبديل", Moment: "لحظة",
+    "in 10 scored": "من 10", "tries per goal": "محاولات لكل هدف", "PPDA now": "PPDA الآن", momentum: "الزخم", minute: "الدقيقة" },
+};
+const label = (text, lang) => LABELS[lang]?.[text] ?? text;
 function hero(cue) {
-  for (const [start, label] of HERO[cue.kind] || []) {
+  for (const [start, text] of HERO[cue.kind] || []) {
     const f = fact(cue, start);
-    if (f) return [String(f.value), label];
+    if (f) return [String(f.value), label(text, cue.language)];
   }
   const minute = fact(cue, "match minute");
-  return minute ? [`${minute.value}'`, "minute"] : null;
+  return minute ? [`${minute.value}'`, label("minute", cue.language)] : null;
 }
 function showCue(cue) {
   state.shown = cue; state.shownAt = performance.now();
@@ -294,8 +311,8 @@ function showCue(cue) {
   box.hidden = true; box.classList.remove("leaving"); void box.offsetWidth;
   const verified = cue.status === "verified";
   box.classList.toggle("verified", verified);
-  const [label, iconId] = KIND[cue.kind] || ["Moment", "i-chance"];
-  $("cue-kind").textContent = `${cue.clock}  ${label}`;
+  const [kindLabel, iconId] = KIND[cue.kind] || ["Moment", "i-chance"];
+  $("cue-kind").textContent = `${cue.clock}  ${label(kindLabel, cue.language)}`;
   $("cue-icon").setAttribute("href", `#${iconId}`);
   $("cue-text").textContent = isolateNumbers(cue.text, cue.language);
   $("cue-text").lang = cue.language;
@@ -537,6 +554,26 @@ window.__render = {
   },
   probe() {
     return state.show?.probe?.() ?? null; // motion QA (matchcut-recap realism)
+  },
+  // overlay mode: only the verified caption card, on a transparent page, in any language, so
+  // clips rendered once are captioned per language with the Studio's own design
+  async caption({ lang, moment }) {
+    document.body.classList.add("overlay");
+    if ($("lang").value !== lang) {
+      $("lang").value = lang;
+      await loadCues();
+    }
+    const cue = state.moments.find((c) => c.moment_id === moment);
+    $("cue").hidden = !cue;
+    if (!cue) return false;
+    state.shown = null;
+    showCue(cue);
+    return true;
+  },
+  // a card still (title or end) for the card clips, in the card's own language
+  card({ title, sub, t }) {
+    document.body.classList.remove("overlay");
+    window.__render.frame({ kind: "card", t, title, sub, cue: null, cueAge: 0 }, 0, 25);
   },
   paint(on) {
     state.show?.setPaint?.(on); // motion QA steps frames without drawing them
