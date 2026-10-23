@@ -20,7 +20,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from matchcut_contracts import Cue, CueStatus, Moment
+from matchcut_contracts import Cue, CueStatus, Moment, MomentKind
+from matchcut_memory import LeagueMemory
 from matchcut_sim import build_league, simulate_match
 from matchcut_sim.cli import replay_analytics
 
@@ -43,6 +44,11 @@ def moments_with_snapshots(
     m = simulate_match(league, home, away, seed=seed)
     found: list[tuple[Moment, dict[str, Any]]] = []
     replay_analytics(m, on_moment=lambda mo, snap: found.append((mo, snap)))
+    scored: dict[str, int] = {}  # a scorer's earlier goals today: his second is numbered as such
+    for i, (mo, snap) in enumerate(found):
+        if mo.kind == MomentKind.GOAL and mo.player_id:
+            found[i] = (mo, {**snap, "scorer_goals_before": scored.get(mo.player_id, 0)})
+            scored[mo.player_id] = scored.get(mo.player_id, 0) + 1
     ids = set(m.meta.home_lineup + m.meta.away_lineup + m.meta.home_bench + m.meta.away_bench)
     ctx = MatchContext(
         home=league.club(home),
@@ -58,8 +64,9 @@ async def run_match(
     moments: Sequence[tuple[Moment, dict[str, Any]]],
     languages: Sequence[str],
     concurrency: int = 4,
+    memory: Any | None = None,
 ) -> tuple[list[Cue], list[MomentReport]]:
-    pipe = InsightsPipeline(brain, ctx, languages=languages)
+    pipe = InsightsPipeline(brain, ctx, languages=languages, memory=memory)
     gate = asyncio.Semaphore(concurrency)
 
     async def one(mo: Moment, snap: dict[str, Any]) -> tuple[list[Cue], MomentReport]:
@@ -75,6 +82,11 @@ def _brain(args: argparse.Namespace) -> AgentBrain:
     return AgentBrain.from_env(memory_db=args.memory_db)
 
 
+def _memory(args: argparse.Namespace) -> LeagueMemory | None:
+    """League Memory read in-process, for the history every goal gets in code."""
+    return LeagueMemory(args.memory_db) if args.memory_db and Path(args.memory_db).is_file() else None
+
+
 def _top(moments: list[tuple[Moment, dict[str, Any]]], n: int | None) -> list[tuple[Moment, dict[str, Any]]]:
     if not n:
         return moments
@@ -87,7 +99,7 @@ async def cmd_run(args: argparse.Namespace) -> None:
     moments = _top(moments, args.max_moments)
     async with _brain(args) as brain:
         cues, reports = await run_match(
-            brain, ctx, moments, args.languages.split(",") if args.languages else []
+            brain, ctx, moments, args.languages.split(",") if args.languages else [], memory=_memory(args)
         )
     if args.voice:
         voiced = voice_cues(cues, AzureSpeech.from_env(), args.media)
@@ -122,7 +134,7 @@ async def cmd_eval(args: argparse.Namespace) -> None:
         for i in range(args.matches):
             ctx, moments = moments_with_snapshots(ids[(5 * i) % 20], ids[(5 * i + 7) % 20], 500 + i)
             cues, reps = await run_match(
-                brain, ctx, _top(moments, args.max_moments), args.languages.split(",")
+                brain, ctx, _top(moments, args.max_moments), args.languages.split(","), memory=_memory(args)
             )
             reports += reps
             en = [c for c in cues if c.status == CueStatus.VERIFIED and c.language == "en"]

@@ -24,6 +24,7 @@ import os
 import re
 import secrets
 import shutil
+import tempfile
 import time
 from collections import defaultdict
 from collections.abc import AsyncIterator
@@ -449,7 +450,8 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
     # ---------------------------------------------------------------- the fan's reel
     reel = Reel(
         pieces=(
-            BlobPieces(store.blobs, s.cuts_dir / "piece-cache")
+            # the image's own folders are read-only for the app's user: the cache lives in temp
+            BlobPieces(store.blobs, Path(tempfile.gettempdir()) / "matchcut-piece-cache")
             if isinstance(store, AzureCuts)
             else LocalPieces(s.pieces_dir)
         ),

@@ -25,6 +25,7 @@ from matchcut_insights.brain import (
     NumberRef,
     Translation,
 )
+from matchcut_insights.facts import goal_history_facts
 from matchcut_insights.redteam import ATTACKS, red_team, report_markdown
 from matchcut_insights.telemetry import configure_telemetry
 from matchcut_sim import build_league, simulate_match
@@ -429,3 +430,21 @@ def test_numbers_written_as_text_still_ground():
     assert not rejected
     _, rejected = history_facts([("career goals before", "48", QID)], tool_results_by_query([ANSWER]))
     assert rejected
+
+
+def test_a_goal_s_history_is_quotable_and_grounded_by_its_query():
+    answer = {
+        "query_id": "LM-abc1234567",
+        "season_goal_number": 8,
+        "career_goal_number": 50,
+        "match_goal_number": 2,
+        "facts": [{"fact": "career_goal_milestone", "goals": 50}, {"fact": "unknown_kind", "x": 1}],
+        "evidence": ["M-0001"],
+    }
+    facts = goal_history_facts(answer)
+    by_label = {f.label: f.value for f in facts}
+    assert by_label["his league goal of the season, counting this one"] == 8  # "his 8th": no maths left
+    assert by_label["his goals in this match, counting this one"] == 2
+    assert by_label["a career milestone, his league goals in all"] == 50
+    assert all(f.source == "league_memory" and f.evidence_ids[0] == "LM-abc1234567" for f in facts)
+    assert len({f.fact_id for f in facts}) == len(facts)
