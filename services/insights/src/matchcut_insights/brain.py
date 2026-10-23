@@ -103,17 +103,21 @@ fewer, British English, vivid but factual. Rules that are checked by code:
 - every name you write must appear in a fact you cite;
 - keep the unit a fact's label gives (percent, km/h);
 - fans hear this line, so never write "xG", "expected goals" or a decimal for chance
-  quality: say it as fans do, using the chance fact ("a chance you score 9 times in 10",
+  quality: say it as fans do, using the chance fact ("a chance that goes in 9 times in 10",
   "the sort scored once in every 20 attempts"), with the digits exactly as given;
 - cite the ID of every fact you use, and only IDs from the fact sheet;
 - list every number you write, in order, with the ID of the fact that states it
   (a score like 2-1 is one entry);
 - no betting language and no league or brand names;
 - no em dashes: use a colon, comma or full stop.
-Prefer one striking fact a fan would care about (a milestone, chance quality, top
-speed, a run of form) over many, and over abstract indices such as momentum. Use a
-shirt number only when it adds something. If
-feedback from the Verifier is given, fix exactly those problems."""
+Lead with what fans cannot see on the screen: when the sheet has a league history fact
+(marked [league history]) that is news (which goal of his season or career this is, a
+milestone, a drought ended, a first, a run of form), build the line around it, adding chance
+quality or another match fact only if it still fits; a bare count (how many times two clubs
+have met, appearances so far) is not news on its own. Otherwise
+prefer one striking fact a fan would care about (chance quality, top speed, a run of form)
+over many, and over abstract indices such as momentum. Use a shirt number only when it
+adds something. If feedback from the Verifier is given, fix exactly those problems."""
 
 LOCALISER = """You are the Localiser. Write the broadcast line in each requested language for
 on-screen graphics and spoken commentary, natural to football fans who speak it. Follow
@@ -126,7 +130,9 @@ Return each item with the exact language tag you were given."""
 
 
 def _facts_block(facts: Sequence[Fact]) -> str:
-    return "\n".join(f"{f.fact_id}: {f.label} = {f.value}" for f in facts)
+    """The fact sheet as the agents read it; grounded League Memory facts are marked."""
+    mark = {"league_memory": " [league history]"}
+    return "\n".join(f"{f.fact_id}: {f.label} = {f.value}{mark.get(f.source, '')}" for f in facts)
 
 
 def _moment_block(moment: Moment) -> str:

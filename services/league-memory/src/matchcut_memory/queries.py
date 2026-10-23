@@ -84,10 +84,12 @@ class LeagueMemory:
             "evidence": [ln["match_id"] for ln in lines[-5:]],
         }
 
-    def goal_context(self, player_id: str, is_home: bool) -> dict[str, Any]:
+    def goal_context(self, player_id: str, is_home: bool, goals_today: int = 0) -> dict[str, Any]:
         """Facts that become true if this player scores now (in the live match).
 
-        All counts are league appearances before the live match.
+        Counts are league appearances before the live match; goals_today is how many he has
+        already scored in it, so his second goal of the day is numbered as such, and a drought
+        or a first goal is only news the first time.
         """
         lines = self._lines(player_id)
         p = self._player(player_id)
@@ -107,13 +109,14 @@ class LeagueMemory:
         venue_rows = [x for x in lines if bool(x["home"]) == is_home]
         venue_drought, last_venue = since_last(venue_rows)
         facts: list[dict[str, Any]] = []
-        if career_goals == 0:
+        first_today = goals_today == 0
+        if career_goals == 0 and first_today:
             facts.append({"fact": "first_league_goal", "apps_before": len(lines)})
-        elif all_drought >= 5:
+        elif all_drought >= 5 and first_today:
             facts.append(
                 {"fact": "goal_drought_ended", "apps_without_goal": all_drought, "last_goal_match": last_any}
             )
-        if career_goals > 0 and venue_drought >= 5:
+        if career_goals > 0 and venue_drought >= 5 and first_today:
             facts.append(
                 {
                     "fact": f"first_{'home' if is_home else 'away'}_goal_in",
@@ -121,17 +124,25 @@ class LeagueMemory:
                     "last_goal_match": last_venue,
                 }
             )
-        new_total = career_goals + 1
+        new_total = career_goals + goals_today + 1
         if new_total in GOAL_MILESTONES:
             facts.append({"fact": "career_goal_milestone", "goals": new_total})
-        if season_goals == 0 and lines:
+        if season_goals == 0 and lines and first_today:
             facts.append({"fact": "first_goal_of_season", "season": current_season})
+        params: dict[str, Any] = {"player_id": player_id, "is_home": is_home}
+        if goals_today:
+            params["goals_today"] = goals_today
         return {
-            "query_id": query_id("goal_context", {"player_id": player_id, "is_home": is_home}),
+            "query_id": query_id("goal_context", params),
             "player_id": player_id,
             "known_as": p["known_as"],
             "career_goals_before": career_goals,
             "season_goals_before": season_goals,
+            "goals_today_before": goals_today,
+            # what fans are told: which goal this is (numbers a line can quote as they are)
+            "season_goal_number": season_goals + goals_today + 1,
+            "career_goal_number": new_total,
+            "match_goal_number": goals_today + 1,
             "facts": facts,
             "evidence": [m for m in (last_any, last_venue) if m],
         }

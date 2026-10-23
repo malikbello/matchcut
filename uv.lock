@@ -1628,6 +1628,7 @@ dependencies = [
     { name = "azure-monitor-opentelemetry" },
     { name = "matchcut-analytics" },
     { name = "matchcut-contracts" },
+    { name = "matchcut-memory" },
     { name = "matchcut-sim" },
 ]
 
@@ -1645,6 +1646,7 @@ requires-dist = [
     { name = "azure-monitor-opentelemetry", specifier = ">=1.6" },
     { name = "matchcut-analytics", editable = "packages/analytics" },
     { name = "matchcut-contracts", editable = "packages/contracts" },
+    { name = "matchcut-memory", editable = "services/league-memory" },
     { name = "matchcut-sim", editable = "services/sim" },
 ]
 provides-extras = ["evals"]

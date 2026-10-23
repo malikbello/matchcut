@@ -7,6 +7,7 @@ dependencies = [
     "matchcut-contracts",
     "matchcut-analytics",
     "matchcut-sim",
+    "matchcut-memory",
     "agent-framework-core==1.22.0",
     "agent-framework-openai>=1.17,<2",
     "azure-identity>=1.26",

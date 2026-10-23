@@ -21,7 +21,7 @@ from typing import Any
 from matchcut_contracts import Cue, CueStatus, Fact, Moment, MomentKind
 
 from matchcut_insights.brain import Brain
-from matchcut_insights.facts import MatchContext, build_facts
+from matchcut_insights.facts import MatchContext, build_facts, goal_history_facts
 from matchcut_insights.languages import canonical
 from matchcut_insights.plain import plain_card
 from matchcut_insights.verify import verify_translation
@@ -61,6 +61,22 @@ class InsightsPipeline:
     min_importance: float = AI_MIN_IMPORTANCE
     timeout_s: float = MOMENT_TIMEOUT_S
     translate_timeout_s: float = TRANSLATE_TIMEOUT_S
+    memory: Any | None = None  # League Memory (matchcut_memory.LeagueMemory): goal history in code
+
+    def _goal_history(self, moment: Moment, snapshot: Mapping[str, Any]) -> list[Fact]:
+        """For a goal: which goal of the scorer's season and career it is, asked of League Memory
+        in code (his earlier goals in this match come with the snapshot)."""
+        if self.memory is None or moment.kind != MomentKind.GOAL or not moment.player_id:
+            return []
+        try:
+            answer = self.memory.goal_context(
+                moment.player_id,
+                moment.team_id == self.ctx.home.club_id,
+                int(snapshot.get("scorer_goals_before", 0)),
+            )
+        except Exception:  # a player League Memory does not know has no history to tell
+            return []
+        return goal_history_facts(answer)
 
     def _cue(
         self,
@@ -98,6 +114,7 @@ class InsightsPipeline:
         if moment.importance < self.min_importance or moment.kind in PLAIN_ONLY:
             return cues, report
         report.ai_attempted = True
+        facts = facts + self._goal_history(moment, snapshot)  # the plain card stays match facts only
         try:
             english = await asyncio.wait_for(self._decide(moment, facts, report, start), self.timeout_s)
         except TimeoutError:
