@@ -208,6 +208,34 @@ def piece_blob(match: str, aspect: str, name: str) -> str:
     return f"pieces/{match}/{aspect}/{name}"
 
 
+def prewarm(
+    blobs: Any, queue: Any, match: str, aspect: str, keys: list[str], langs: list[str], chunks: int = 4
+) -> list[str]:
+    """Queue every moment clip not yet published (sliced as a fan's request is) and the cards in
+    every language not yet published, so reels and cuts are ready before the first fan asks.
+    Run again at any time: what is published is skipped. Returns the clips queued."""
+    queued = []
+    for key in keys:
+        if _exists(blobs, piece_blob(match, aspect, f"{key}.en.mp4")):
+            continue
+        blobs.upload_blob(f"work/{match}/{aspect}/{key}/requested", b"", overwrite=True)
+        for chunk in range(chunks):
+            msg = {
+                "kind": "clip",
+                "match": match,
+                "aspect": aspect,
+                "key": key,
+                "chunk": chunk,
+                "chunks": chunks,
+            }
+            queue.send_message(json.dumps(msg))
+        queued.append(key)
+    for lang in langs:
+        if not _exists(blobs, piece_blob(match, aspect, f"end.{lang}.mp4")):
+            queue.send_message(json.dumps({"kind": "cards", "match": match, "aspect": aspect, "lang": lang}))
+    return queued
+
+
 def render_clip(blobs: Any, req: dict[str, Any]) -> None:
     """A moment clip, rendered once for every fan: sliced like films, then captioned in every
     voiced language and published with its poster frame, and the match manifest updated."""

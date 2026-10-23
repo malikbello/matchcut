@@ -283,6 +283,30 @@ def cmd_captions(a: argparse.Namespace) -> list[Path]:
     return made
 
 
+def cmd_prewarm(a: argparse.Namespace) -> list[str]:
+    """Azure: queue every moment clip and card set of a match on the render job (signed in as
+    the deployer: Azure CLI or any DefaultAzureCredential source)."""
+    from azure.identity import DefaultAzureCredential  # noqa: PLC0415
+    from azure.storage.blob import BlobServiceClient  # noqa: PLC0415
+    from azure.storage.queue import QueueClient  # noqa: PLC0415
+    from matchcut_editing.edl import clip_plan  # noqa: PLC0415
+    from matchcut_editing.inputs import VOICED, read_feed  # noqa: PLC0415
+
+    from matchcut_recap.job import CONTAINER, QUEUE, prewarm  # noqa: PLC0415
+
+    data = Path(a.data)
+    feed = read_feed(data, a.match)
+    cues = _cues(data / "insights" / f"{a.match}.jsonl", "en")
+    keys = list(clip_plan(feed, cues, {g["t"]: 0.0 for g in feed.get("goals", [])}))  # keys only
+    cred = DefaultAzureCredential()
+    blobs = BlobServiceClient(f"https://{a.account}.blob.core.windows.net", credential=cred)
+    queue = QueueClient(f"https://{a.account}.queue.core.windows.net", QUEUE, credential=cred)
+    langs = a.langs.split(",") if a.langs else VOICED
+    queued = prewarm(blobs.get_container_client(CONTAINER), queue, a.match, a.aspect, keys, langs, a.chunks)
+    print(f"{len(keys)} clips in the plan, {len(queued)} queued: {', '.join(queued) or 'none'}")
+    return queued
+
+
 def cmd_cards(a: argparse.Namespace) -> list[Path]:
     """Render the title cards (every focus, every language) and the end cards."""
     from matchcut_editing.inputs import VOICED, focuses  # noqa: PLC0415
@@ -356,7 +380,17 @@ def main(argv: list[str] | None = None) -> None:
         c.add_argument("--out", default="out/pieces")
         c.add_argument("--ffmpeg", default=shutil.which("ffmpeg") or "ffmpeg")
         c.add_argument("--gpu-less", action="store_true")
+    w = sub.add_parser("prewarm", help="Azure: queue every moment clip and card set on the render job")
+    w.add_argument("--match", required=True)
+    w.add_argument("--account", required=True, help="the storage account with the cuts queue")
+    w.add_argument("--aspect", choices=["16x9", "9x16"], default="9x16")
+    w.add_argument("--langs", help="comma-separated; default: every voiced language")
+    w.add_argument("--chunks", type=int, default=4, help="slices per clip (job replicas in parallel)")
+    w.add_argument("--data", default="out")
     args = p.parse_args(argv)
+    if args.cmd == "prewarm":
+        cmd_prewarm(args)
+        return
     if args.cmd == "clip":
         cmd_clip(args)
         return

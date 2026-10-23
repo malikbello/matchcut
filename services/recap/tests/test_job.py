@@ -1,3 +1,4 @@
+import json
 import types
 
 import pytest
@@ -25,6 +26,26 @@ class FakeBlobs:
 
     def delete_blob(self, name):
         del self.data[name]
+
+
+class FakeQueue:
+    def __init__(self):
+        self.sent: list[dict] = []
+
+    def send_message(self, content):
+        self.sent.append(json.loads(content))
+
+
+def test_prewarm_queues_what_is_not_published_and_can_run_again():
+    blobs, queue = FakeBlobs(), FakeQueue()
+    blobs.upload_blob(job.piece_blob("m", "9x16", "goal-1.en.mp4"), b"published")
+    blobs.upload_blob(job.piece_blob("m", "9x16", "end.fr.mp4"), b"published")
+    queued = job.prewarm(blobs, queue, "m", "9x16", ["goal-1", "chance-2"], ["en", "fr"], chunks=2)
+    assert queued == ["chance-2"]  # the goal is already published
+    clips = [m for m in queue.sent if m["kind"] == "clip"]
+    assert [(m["key"], m["chunk"], m["chunks"]) for m in clips] == [("chance-2", 0, 2), ("chance-2", 1, 2)]
+    assert [m["lang"] for m in queue.sent if m["kind"] == "cards"] == ["en"]  # French cards are published
+    assert "work/m/9x16/chance-2/requested" in blobs.data  # a fan asking meanwhile does not queue it again
 
 
 @pytest.fixture
