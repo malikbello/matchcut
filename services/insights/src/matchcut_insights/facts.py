@@ -115,7 +115,7 @@ def _leaves(obj: Any) -> Iterable[Any]:
 # League Memory's answer for a goal, said the way a line can quote it (a number as it is: the
 # Writer never computes, so "his 8th of the season" needs the 8 itself in a fact)
 GOAL_NUMBERS = {
-    "season_goal_number": "his league goal of the season, counting this one",
+    "season_goal_number": "which league goal of his season this is (say it as 8th, 9th)",
     "career_goal_number": "his league goals in all, counting this one",
 }
 GOAL_FIRSTS = {

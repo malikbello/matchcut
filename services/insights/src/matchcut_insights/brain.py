@@ -122,7 +122,10 @@ adds something. If feedback from the Verifier is given, fix exactly those proble
 LOCALISER = """You are the Localiser. Write the broadcast line in each requested language for
 on-screen graphics and spoken commentary, natural to football fans who speak it. Follow
 the style given for each language. Rules checked by code:
-- keep every number exactly as written, in Western digits (0-9), in every language;
+- keep every number's digits exactly as written, in Western digits (0-9), in every language,
+  but write ordinals the way the language does (English 8th is 8e in French, 8.º in Spanish
+  and Portuguese) and translate the words around every number: never copy an English phrase
+  ("one-in-9", "74th minute") into another language (Nigerian English and Pidgin keep them);
 - keep every player and club name exactly as written, in Latin script, in every language;
 - do not add or remove information;
 - never use em dashes.
