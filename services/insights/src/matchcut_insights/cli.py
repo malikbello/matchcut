@@ -273,6 +273,16 @@ def cmd_calls(args: argparse.Namespace) -> None:
     print(f"{len(calls)} calls in {len({c.language for c in calls})} languages -> {out}")
 
 
+def cmd_voice(args: argparse.Namespace) -> None:
+    """Voice a match's verified lines again wherever the words changed since they were voiced
+    (no line is rewritten): every voice file says what its caption says."""
+    path = Path(args.cues or f"out/insights/{args.match}.jsonl")
+    cues = [Cue.model_validate_json(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+    voiced = voice_cues(cues, AzureSpeech.from_env(), args.media)
+    path.write_text("".join(c.model_dump_json() + "\n" for c in cues), encoding="utf-8")
+    print(f"{voiced} verified lines voiced and current -> {args.media}/audio/{args.match}")
+
+
 def main(argv: list[str] | None = None) -> None:
     if isinstance(sys.stdout, io.TextIOWrapper):
         sys.stdout.reconfigure(encoding="utf-8")
@@ -308,7 +318,14 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--media", default="out/media")
     c.add_argument("--out-dir", default="out/calls")
     c.add_argument("--feeds", default="out/feeds", help="tracking feeds, for the calls over solo runs")
+    v = sub.add_parser("voice", help="voice a match's lines again wherever the words changed")
+    v.add_argument("--match", required=True)
+    v.add_argument("--cues", help="the match's lines (default out/insights/<match>.jsonl)")
+    v.add_argument("--media", default="out/media")
     args = p.parse_args(argv)
+    if args.cmd == "voice":
+        cmd_voice(args)
+        return
     if args.cmd == "redteam":
         cmd_redteam(args)
         return
