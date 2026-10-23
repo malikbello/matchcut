@@ -18,7 +18,9 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 
 from matchcut_editing.edl import Cut, call_lines
@@ -27,6 +29,10 @@ HEARD = 0.6  # of a line's words in the transcript (names a recogniser spells it
 READ = 0.8  # of a caption's words in the text read off the frame
 TARGET_LUFS, LUFS_TOLERANCE = -16.0, 2.0
 LISTEN_BEFORE_S, LISTEN_AFTER_S = 0.5, 6.0  # where a voiced line's words may land in the transcript
+NEAR = 0.66  # a word heard nearly as written counts ("bat" for "but", "don't" for "don")
+# languages no recogniser hears word for word yet (Azure has no Pidgin model): their lines are
+# checked for being voiced where the plan puts them, not word by word, and the report says so
+PRESENCE_ONLY = {"pcm"}
 
 
 @dataclass
@@ -66,13 +72,37 @@ def words(text: str) -> list[str]:
     return [w for w in re.split(r"[^\w]+", plain) if w]
 
 
-def recall(expected: str, got: str) -> float:
-    """The share of the expected words found in what was heard or read (order-free, with repeats)."""
-    want = Counter(words(expected))
-    if not want:
-        return 1.0
+def recall(expected: str, got: str, names: Iterable[str] = ()) -> float:
+    """The share of the expected words found in what was heard or read (order-free, with repeats).
+    names: words a recogniser cannot be held to (the league's invented names, which it spells its
+    own way or in another script); they are set aside, and a line made only of names counts as
+    found if anything was said there. A word found nearly as written counts (NEAR)."""
+    every = words(expected)
+    skip = {w for n in names for w in words(n)}
+    want = [w for w in every if w not in skip]
     have = Counter(words(got))
-    return sum(min(n, have[w]) for w, n in want.items()) / sum(want.values())
+    if not every:
+        return 1.0
+    if not want:
+        return 1.0 if have else 0.0
+    found = 0
+    for w in want:
+        near = (
+            w
+            if have[w] > 0
+            else next(
+                (
+                    h
+                    for h in have
+                    if have[h] > 0 and len(w) >= 3 and SequenceMatcher(None, w, h).ratio() >= NEAR
+                ),
+                None,
+            )
+        )
+        if near is not None:
+            have[near] -= 1
+            found += 1
+    return found / len(want)
 
 
 @dataclass
@@ -96,17 +126,28 @@ def judge(
     transcript: list[tuple[float, float, str]],
     reads: dict[float, str],
     lufs: float | None,
+    names: Iterable[str] = (),
 ) -> QAReport:
     """The verdict: every voiced line heard around its time, every caption read in its window, the
-    level right. transcript: (start s, end s, text) phrases; reads: frame second -> text read."""
+    level right. transcript: (start s, end s, text) phrases; reads: frame second -> text read;
+    names: the league's names, set aside when listening (on screen they must read exactly)."""
+    names = list(names)
     report = QAReport(film, language, lufs=lufs)
     for sp in spoken:
         near = " ".join(
             t for a, b, t in transcript if b >= sp.at - LISTEN_BEFORE_S and a <= sp.at + LISTEN_AFTER_S
         )
-        r = recall(sp.text, near)
+        r = recall(sp.text, near, names)
+        presence = language in PRESENCE_ONLY
         report.lines.append(
-            {"at": sp.at, "role": sp.role, "text": sp.text, "recall": round(r, 2), "heard": r >= HEARD}
+            {
+                "at": sp.at,
+                "role": sp.role,
+                "text": sp.text,
+                "recall": round(r, 2),
+                "heard": bool(words(near)) if presence else r >= HEARD,
+                "check": "voiced" if presence else "words",
+            }
         )
     for sh in shown:
         r = recall(sh.text, reads.get(sh.middle, ""))

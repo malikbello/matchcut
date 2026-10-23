@@ -1,4 +1,5 @@
 import gzip
+import json
 import time
 
 import pytest
@@ -457,3 +458,24 @@ def test_clip_that_asks_the_renderer_once_per_stretch_of_play(settings, tmp_path
     r = client.post(f"/api/matches/{MATCH}/clips", json={"start": 1000, "end": 16000})
     assert r.json() == {"key": "window-1000-16000", "ready": False}
     assert asked == [(MATCH, "9x16", "window-1000-16000")]
+
+
+def test_a_moment_carries_the_qa_agents_verdict(tmp_path):
+    folder = tmp_path / MATCH / "9x16"
+    folder.mkdir(parents=True)
+    report = {
+        "passed": True,
+        "lufs": -15.9,
+        "lines": [{"heard": True}, {"heard": True}],
+        "captions": [{"read": True}],
+    }
+    (folder / "goal-1.en.qa.json").write_text(json.dumps(report), encoding="utf-8")
+    reel = Reel(LocalPieces(tmp_path), tmp_path, tmp_path, b"key")
+    assert reel.qa(MATCH, "9x16", "goal-1", "en") == {
+        "passed": True,
+        "heard": "2/2",
+        "read": "1/1",
+        "lufs": -15.9,
+        "words": True,
+    }
+    assert reel.qa(MATCH, "9x16", "goal-1", "fr") is None  # not checked yet

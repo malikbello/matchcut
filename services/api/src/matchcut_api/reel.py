@@ -20,6 +20,7 @@ import logging
 import re
 import tempfile
 import threading
+import time
 from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -29,6 +30,7 @@ from typing import Any, Protocol
 from matchcut_api.cuts import Film, file_film
 
 log = logging.getLogger(__name__)
+QA_TTL_S = 60  # a moment's QA verdict is read again after this long
 
 KEY = re.compile(r"^(goal|conceded|chance)-\d{1,9}$|^window-\d{1,9}-\d{1,9}$")
 ASPECT = re.compile(r"^(9x16|16x9)$")
@@ -144,6 +146,7 @@ class Reel:
     _locks: dict[str, threading.Lock] = field(default_factory=dict, repr=False)
     _guard: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _warming: set[str] = field(default_factory=set, repr=False)
+    _qa: dict[str, tuple[float, dict[str, Any] | None]] = field(default_factory=dict, repr=False)
     _warmer: ThreadPoolExecutor = field(
         default_factory=lambda: ThreadPoolExecutor(max_workers=1, thread_name_prefix="reel-warm"), repr=False
     )
@@ -196,9 +199,36 @@ class Reel:
                     "text": cue["text"] if cue else None,
                     "verified": bool(cue and cue.get("status") == "verified"),
                     "ready": self.pieces.exists(match, aspect, f"{key}.{lang}.mp4"),
+                    "qa": self.qa(match, aspect, key, lang),
                 }
             )
         return out
+
+    def qa(self, match: str, aspect: str, key: str, lang: str) -> dict[str, Any] | None:
+        """The QA agent's verdict on a moment's film in one language, in brief (None until it has
+        checked it): lines heard, captions read, the level. Remembered for a minute."""
+        name = f"{key}.{lang}.qa.json"
+        held = self._qa.get(name)
+        if held and time.monotonic() - held[0] < QA_TTL_S:
+            return held[1]
+        summary = None
+        path = self.pieces.path(match, aspect, name)
+        if path is not None:
+            try:
+                r = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                r = None
+            if isinstance(r, dict):
+                lines, caps = r.get("lines", []), r.get("captions", [])
+                summary = {
+                    "passed": bool(r.get("passed")),
+                    "heard": f"{sum(1 for x in lines if x.get('heard'))}/{len(lines)}",
+                    "read": f"{sum(1 for x in caps if x.get('read'))}/{len(caps)}",
+                    "lufs": r.get("lufs"),
+                    "words": not any(x.get("check") == "voiced" for x in lines),
+                }
+        self._qa[name] = (time.monotonic(), summary)
+        return summary
 
     def moment_film(self, match: str, aspect: str, key: str, lang: str) -> Film | None:
         """A moment as a short film with its soundtrack; mixed once (ahead of play, or on first
