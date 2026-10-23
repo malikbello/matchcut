@@ -116,7 +116,7 @@ export function actionFor(ev, { keeper, speed, meta }) {
       return pick(clip) ? { clip, faceTarget: true, beaten: true, stretch } : null;
     }
     case "tackle":
-      return { clip: speed > 2 ? pick("soccer_tackle_2", "soccer_tackle") : pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false };
+      return { clip: speed > 2 ? pick("soccer_tackle_2", "soccer_tackle") : pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false, faceBall: true };
     case "interception":
     case "ball_recovery":
       return { clip: pick("receive", "receive_soccerball"), faceTarget: false };
@@ -124,8 +124,8 @@ export function actionFor(ev, { keeper, speed, meta }) {
       return { clip: keeper ? pick("goalkeeper_body_block") : pick("soccer_tackle_3", "goalkeeper_body_block_2"), faceTarget: false };
     case "throw_in":
       return { clip: pick("throw_in"), faceTarget: true };
-    case "foul":
-      return { clip: pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false };
+    case "foul": // on the player, not the ball: the ball is never drawn onto the fouler's foot
+      return { clip: pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false, faceBall: true, offBall: true };
     case "celebrate":
       return { clip: pick("victory"), faceTarget: false, celebrate: true };
     case "fouled":
