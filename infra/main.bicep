@@ -164,6 +164,13 @@ resource deployerBlobRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   properties: { principalId: principal.id, principalType: principal.type, roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.blobDataContributor) }
 }]
 
+// deployers queue the render job's warm-up (matchcut-recap prewarm: every clip before fans ask)
+resource deployerQueueRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principal in deployerPrincipalIds: {
+  scope: storage
+  name: guid(storage.id, principal.id, roles.queueDataContributor)
+  properties: { principalId: principal.id, principalType: principal.type, roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.queueDataContributor) }
+}]
+
 // the release identity: push images, read the showcase bundle, roll out new revisions
 resource releasePush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: registry
