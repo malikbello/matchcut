@@ -10,6 +10,7 @@ next to the match's other media, with a manifest of which voice made each file.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -144,7 +145,14 @@ def voice_key(lang: str, kind: str = "", live: bool = False) -> str | None:
     return f"{voice}#{mood}" if mood else voice
 
 
-MANIFEST = "voices.json"  # cue ID -> voice key, so a voice change re-renders only what changed
+MANIFEST = "voices.json"  # cue ID -> voice and words, so only a changed voice or line is voiced again
+
+
+def cache_key(voice: str, text: str) -> str:
+    """What a voice file says, as the manifest records it: the voice and a digest of the words. A
+    line rewritten under the same cue ID is voiced again (keyed on the voice alone, a rewritten
+    line kept its old audio under its new caption)."""
+    return f"{voice}|{hashlib.sha256(text.encode('utf-8')).hexdigest()[:12]}"
 
 
 def voice_cues(cues: list, speech: AzureSpeech, media_root: str | Path) -> int:
@@ -161,13 +169,13 @@ def voice_cues(cues: list, speech: AzureSpeech, media_root: str | Path) -> int:
         rel = Path("audio") / cue.match_id / f"{cue.cue_id}.mp3"
         target = root / rel
         manifest = manifests.setdefault(target.parent, _read_manifest(target.parent))
-        if not (target.is_file() and manifest.get(cue.cue_id) == key):
+        if not (target.is_file() and manifest.get(cue.cue_id) == cache_key(key, cue.text)):
             result = speech.synthesize(cue.text, cue.language, cue.kind.value)
             if result is None:
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_bytes(result[0])
-            manifest[cue.cue_id] = key
+            manifest[cue.cue_id] = cache_key(key, cue.text)
         cues[i] = cue.model_copy(update={"audio": rel.as_posix(), "voice": key})
         done += 1
     for folder, manifest in manifests.items():
@@ -207,7 +215,9 @@ def voice_calls(
         key = f"{key}+lift" if call.kind in ("build", "run") else key
         rel = Path("audio") / match_id / f"{call.call_id}.mp3"
         call.audio, call.voice = rel.as_posix(), key
-        if not ((Path(media_root) / rel).is_file() and manifest.get(call.call_id) == key):
+        if not (
+            (Path(media_root) / rel).is_file() and manifest.get(call.call_id) == cache_key(key, call.text)
+        ):
             todo.append((call, mood, key))
 
     def work(item: tuple) -> tuple:
@@ -221,6 +231,6 @@ def voice_calls(
                 call.audio = call.voice = None
                 continue
             (Path(media_root) / call.audio).write_bytes(result[0])
-            manifest[call.call_id] = key
+            manifest[call.call_id] = cache_key(key, call.text)
     (folder / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True), encoding="utf-8")
     return sum(1 for c in calls if c.audio)
