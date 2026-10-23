@@ -21,6 +21,38 @@ const FADE_OUT = 0.3;
 const TURN_RATE = 7; // rad/s, body yaw
 const SPRINT_FACING = 4.3; // above this speed players face where they run
 
+// Celebrations a scorer can make, beyond the library's one victory clip, posed in code by aiming
+// the skeleton's limbs as games do for aim poses: "leap" jumps with a half turn and lands arms
+// swept down and out, chest out, feet planted wide; "aeroplane" runs to the corner arms out wide.
+// A scorer's goals of a match take the styles in turn, from a start his name sets.
+export const CELEBRATIONS = ["leap", "victory", "aeroplane"];
+export function celebrationStyle(name, goalsBefore = 0) {
+  let h = 0;
+  for (const ch of name || "") h += ch.charCodeAt(0);
+  return CELEBRATIONS[(h + goalsBefore) % CELEBRATIONS.length];
+}
+const LEAP = { start: 0.15, up: 0.5, height: 0.55, hold: 1.4 }; // s after arriving, s in the air, m, s held
+// when a leaping scorer lets the landing go and celebrates on (the victory clip takes over)
+export const LEAP_END = LEAP.start + LEAP.up + LEAP.hold;
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _turn = new THREE.Quaternion();
+const _world = new THREE.Quaternion();
+const _parent = new THREE.Quaternion();
+const _dir = new THREE.Vector3();
+
+// turn a bone so that it points (towards its child joint) along a world direction, by weight w
+function aim(bone, child, dir, w) {
+  if (!bone || !child || w <= 0) return;
+  bone.getWorldPosition(_a);
+  child.getWorldPosition(_b);
+  _turn.setFromUnitVectors(_b.sub(_a).normalize(), dir);
+  bone.getWorldQuaternion(_world).premultiply(_turn);
+  bone.parent.getWorldQuaternion(_parent).invert();
+  bone.quaternion.slerp(_parent.multiply(_world), w);
+  bone.updateMatrixWorld(true);
+}
+
 // Kit painted over the textured athlete. Regions are measured on the bind pose (the
 // un-skinned position), so they follow the body as it animates: boots, socks, shorts,
 // shirt with short sleeves and collar; skin keeps the character's texture, tinted to the
@@ -364,6 +396,22 @@ export class Player {
       this.loco = [{ clip: "Jog_Fwd_Loop", dir: 0, speed: 3.8, action: make("Jog_Fwd_Loop") }];
       this.gears = [{ clip: "Sprint_Loop", speed: 7, action: make("Sprint_Loop") }];
     }
+    // limbs a celebration poses: [joint, the joint it points to] for each segment
+    const bone = (re) => {
+      let found = null;
+      body.traverse((o) => {
+        if (!found && o.isBone && re.test(o.name)) found = o;
+      });
+      return found;
+    };
+    const chain = (side, names) => names.map((n) => bone(new RegExp(`${side}[ _]${n}$`, "i")));
+    this.limbs = {
+      L: { arm: chain("L", ["UpperArm", "Forearm", "Hand"]), leg: chain("L", ["Thigh", "Calf", "Foot"]) },
+      R: { arm: chain("R", ["UpperArm", "Forearm", "Hand"]), leg: chain("R", ["Thigh", "Calf", "Foot"]) },
+    };
+    // the gait of a player running with the ball at his feet (body over the ball, short steps)
+    this.dribbleGait = this.cc0 ? null : make("dribble");
+    this.dribbleStride = (lib.meta?.dribble?.root_speed ?? 2.4) * (this.dribbleGait?.getClip().duration ?? 1.7);
     this.actions = new Map(); // clip name -> AnimationAction (created on first use)
     this.phase = (seed * 0.137) % 1;
     this.strides = 0;
@@ -441,7 +489,7 @@ export class Player {
   }
 
   // event: the feed row, or null; tMs: match time
-  update({ x, z, vx, vz, ballX, ballZ, tMs, dt, event, snap }) {
+  update({ x, z, vx, vz, ballX, ballZ, tMs, dt, event, snap, carrying = false, celebration = null }) {
     this.root.position.set(x, 0, z);
     const v = Math.hypot(vx, vz);
     this.speed = snap ? v : this.speed + (v - this.speed) * Math.min(1, dt * 8);
@@ -476,18 +524,22 @@ export class Player {
         if (since >= 0 && local >= 0 && local <= dur) {
           act = a;
           a.time = local;
-          now = { clip: choice.clip, at: Math.round(local * 100) / 100 };
+          // motion QA: the clip, its time and contact, and whether it aims at a target (a shot, a pass)
+          now = { clip: choice.clip, at: Math.round(local * 100) / 100, contact: choice.stretch ?? m.contact,
+            aims: Boolean(choice.faceTarget && event[7] >= 0) };
           actionWeight = Math.min(1, since / FADE_IN, (dur - local) / FADE_OUT);
           // the ball is drawn onto the striking bone in the fifth of a second before contact,
           // and let go just after it, when the tracked ball takes over in flight
           const bone = this.strikers[m.contact_bone];
           const before = THREE.MathUtils.smoothstep(local, m.contact - 0.22, m.contact);
           const after = 1 - THREE.MathUtils.smoothstep(local, m.contact, m.contact + 0.05);
-          strike = bone && !this.catching && !choice.beaten ? { bone, w: Math.min(before, after) } : null;
+          strike = bone && !this.catching && !choice.beaten && !choice.offBall ? { bone, w: Math.min(before, after) } : null;
           if (choice.faceTarget && event[7] >= 0) {
             const tx = event[7] / 10 - 52.5;
             const tz = event[8] / 10 - 34;
             target = Math.atan2(tx - x, tz - z);
+          } else if (choice.faceBall) {
+            target = toBall; // a tackle goes in on the ball, even from a sprint
           }
         }
       }
@@ -500,6 +552,7 @@ export class Player {
 
     const turn = wrap(target - this.heading);
     this.heading = snap ? target : this.heading + Math.sign(turn) * Math.min(Math.abs(turn), TURN_RATE * dt);
+    if (now?.aims) now.off = Math.round(Math.abs(THREE.MathUtils.radToDeg(wrap(target - this.heading))));
     this.root.rotation.y = this.heading - this.yawOffset;
     this.catching = Boolean(act && this.keeper && event && event[1] === "save" && tMs >= event[0]);
 
@@ -553,6 +606,14 @@ export class Player {
       total += w;
     }
     stride = total > 0 ? stride / total : 2;
+    // the ball at his feet, moving forwards at up to a fast jog: the dribbling gait takes over (a
+    // sprint stays a run with long touches); it shares the stride phase, so touches stay in step
+    const forwards = 1 - THREE.MathUtils.smoothstep(Math.abs(rel), 40, 70);
+    const dribble =
+      this.dribbleGait && carrying && !this.keeper
+        ? THREE.MathUtils.smoothstep(s, 0.9, 1.6) * (1 - THREE.MathUtils.smoothstep(s, 4.8, 5.8)) * forwards
+        : 0;
+    stride = stride * (1 - dribble) + this.dribbleStride * dribble;
     if (!snap) {
       const next = (this.phase + (dt * Math.max(s, 0.6)) / Math.max(0.5, stride)) % 1;
       if (next < this.phase) this.strides++; // a completed stride cycle (sprint touches every other one)
@@ -562,12 +623,62 @@ export class Player {
     const locoWeight = (1 - actionWeight) * moving;
     for (const l of [...this.loco, ...this.gears]) {
       l.action.time = this.phase * l.action.getClip().duration;
-      l.action.setEffectiveWeight(locoWeight * (weights.get(l.action) ?? 0));
+      l.action.setEffectiveWeight(locoWeight * (1 - dribble) * (weights.get(l.action) ?? 0));
+    }
+    if (this.dribbleGait) {
+      this.dribbleGait.time = this.phase * this.dribbleGait.getClip().duration;
+      this.dribbleGait.setEffectiveWeight(locoWeight * dribble);
     }
     if (this.idle) {
       this.idle.time = (tMs / 1000) % this.idle.getClip().duration;
       this.idle.setEffectiveWeight((1 - actionWeight) * (1 - moving));
     }
     this.mixer.update(0);
+    if (celebration) this.celebrate(celebration);
+  }
+
+  // a scorer's own celebration, posed over the clips: { style, cel } with cel the seconds since
+  // he reached the corner (null while still running there)
+  celebrate({ style, cel }) {
+    const { L, R } = this.limbs;
+    if (!L.arm[0] || !R.arm[0]) return;
+    let spin = 0;
+    let lift = 0;
+    let arms = null; // [side, up, back] weights of each arm's direction
+    let legs = 0; // how wide the feet are planted
+    let weight = 1; // how much the pose overrides the clip underneath
+    if (style === "aeroplane" && cel === null && this.speed > 1.5) {
+      arms = [0.97, -0.08, 0.2];
+    } else if (style === "leap" && cel !== null) {
+      const air = THREE.MathUtils.clamp((cel - LEAP.start) / LEAP.up, 0, 1);
+      lift = cel > LEAP.start && air < 1 ? LEAP.height * Math.sin(Math.PI * air) : 0;
+      spin = Math.PI * THREE.MathUtils.smootherstep(air, 0, 1); // a half turn in the air
+      const landed = THREE.MathUtils.smoothstep(cel, LEAP.start + LEAP.up, LEAP.start + LEAP.up + 0.12);
+      // in the air the arms rise wide; landed they sweep down and back, chest out
+      arms = [0.62, THREE.MathUtils.lerp(0.55, -0.72, landed), THREE.MathUtils.lerp(0, 0.32, landed)];
+      // after the hold the pose lets go and the victory clip takes the body back, smoothly
+      weight = 1 - THREE.MathUtils.smoothstep(cel, LEAP_END, LEAP_END + 0.35);
+      legs = landed * weight;
+      if (weight <= 0) return;
+    }
+    if (!arms) return;
+    this.root.position.y += lift - legs * 0.035; // wide feet sit lower, the hips drop to the turf
+    this.root.rotation.y += spin;
+    this.root.updateMatrixWorld(true);
+    const facing = this.heading + spin;
+    const fwd = _b.set(Math.sin(facing), 0, Math.cos(facing)).clone();
+    const right = new THREE.Vector3(-Math.cos(facing), 0, Math.sin(facing));
+    for (const [side, limbs] of [[-1, L], [1, R]]) {
+      const [s, up, back] = arms;
+      _dir.copy(right).multiplyScalar(side * s).addScaledVector(fwd, -back).setY(up).normalize();
+      aim(limbs.arm[0], limbs.arm[1], _dir, weight);
+      aim(limbs.arm[1], limbs.arm[2], _dir, weight);
+      if (legs > 0) {
+        _dir.copy(right).multiplyScalar(side * 0.3).setY(-0.95).normalize();
+        aim(limbs.leg[0], limbs.leg[1], _dir, legs);
+        _dir.copy(right).multiplyScalar(side * 0.12).setY(-0.99).normalize();
+        aim(limbs.leg[1], limbs.leg[2], _dir, legs);
+      }
+    }
   }
 }

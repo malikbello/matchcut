@@ -15,7 +15,7 @@ import { Director } from "./camera.js";
 import { buildPitch, L, toWorld, W } from "./pitch.js";
 import { loadLibrary } from "./library.js";
 import { celebrationPose, planPackage, segmentAt } from "./package.js";
-import { Player } from "./players.js";
+import { celebrationStyle, LEAP_END, Player } from "./players.js";
 import { FrameGovernor, ORDER, TIERS, webglAvailable } from "./quality.js";
 import { animateCrowd, buildSky, buildStadium } from "./stadium.js";
 
@@ -68,6 +68,7 @@ function keeperKits(feed) {
 const GOAL_HALF = 3.66; // half the goal's width (7.32 m)
 const GOAL_CLEAR = 0.45; // how close a body may come to the goal line inside the goal mouth
 const BALL_ON_LINE = 0.3; // where a ball that never went in is held: just in front of the goal line
+const BODY_GAP = 0.55; // m between two players' centres: closer and their bodies pass through one another
 const CROSSBAR = 2.44;
 const PASS_DECAY = 0.45; // 1/s: a rolling pass loses about a third of its pace over a second
 const MAX_CONTROLLED_SPEED = 20; // m/s: how fast a ball knocked between players can be drawn moving
@@ -107,7 +108,10 @@ function buildFlights(feed) {
 // per-slot event index: for any moment, the event whose action window covers it
 function indexEvents(feed) {
   const bySlot = feed.slots.map(() => []);
-  for (const e of feed.events ?? []) if (e[2] >= 0) bySlot[e[2]].push(e);
+  // a goal or a card is not something a player's body does: in his row it would hide the strike
+  // or the foul just before it (the latest event wins), so a scorer would never kick the ball
+  const STILL = new Set(["goal", "card"]);
+  for (const e of feed.events ?? []) if (e[2] >= 0 && !STILL.has(e[1])) bySlot[e[2]].push(e);
   // fouled players fall: give the recipient of a foul its own row
   for (const e of feed.events ?? []) if (e[1] === "foul" && e[9] >= 0) bySlot[e[9]].push([e[0], "fouled", e[9], "", "", e[5], e[6], -1, -1, -1]);
   for (const g of goalShots(feed)) {
@@ -462,12 +466,45 @@ export async function createShow({
     const [x, z] = toWorld(spline(x0, xa, xb, x3, u) / 10, spline(y0, ya, yb, y3, u) / 10);
     const vx = splineVel(x0, xa, xb, x3, u, span) / 10;
     const vz = splineVel(y0, ya, yb, y3, u, span) / 10;
-    // bodies stop at the netting: a player tracked over the line inside the goal mouth (a scorer
-    // running on after a tap-in) is held at the goal line, never drawn through the net
-    if (Math.abs(x) > L / 2 - GOAL_CLEAR && Math.abs(z) < GOAL_HALF + 0.5) {
-      return { x: Math.sign(x) * (L / 2 - GOAL_CLEAR), z, vx: 0, vz, jump };
+    return keepOutOfNet({ x, z, vx, vz, jump });
+  }
+
+  // bodies stop at the netting: a player tracked over the line inside the goal mouth (a scorer
+  // running on after a tap-in) is held at the goal line, never drawn through the net
+  function keepOutOfNet(tr) {
+    if (Math.abs(tr.x) > L / 2 - GOAL_CLEAR && Math.abs(tr.z) < GOAL_HALF + 0.5) {
+      tr.x = Math.sign(tr.x) * (L / 2 - GOAL_CLEAR);
+      tr.vx = 0;
     }
-    return { x, z, vx, vz, jump };
+    return tr;
+  }
+
+  // Personal space: the simulation's players have no bodies, so two can share a spot and run
+  // through each other. Drawn positions are eased apart to a body's width, from this instant
+  // alone (so slices of a film stay identical), the push growing smoothly from nothing.
+  function separate(trs) {
+    for (let pass = 0; pass < 6; pass++) {
+      for (let a = 0; a < trs.length; a++) {
+        const A = trs[a];
+        if (!A) continue;
+        for (let b = a + 1; b < trs.length; b++) {
+          const B = trs[b];
+          if (!B) continue;
+          const d = Math.hypot(A.x - B.x, A.z - B.z);
+          if (d >= BODY_GAP) continue;
+          // on the very same spot they part the same way every time
+          const ang = ((a * 7 + b * 13) % 360) * (Math.PI / 180);
+          const ux = d < 1e-3 ? Math.cos(ang) : (A.x - B.x) / d;
+          const uz = d < 1e-3 ? Math.sin(ang) : (A.z - B.z) / d;
+          const push = (BODY_GAP - d) / 2;
+          A.x += ux * push;
+          A.z += uz * push;
+          B.x -= ux * push;
+          B.z -= uz * push;
+        }
+      }
+    }
+    for (const tr of trs) if (tr) keepOutOfNet(tr);
   }
 
   // who wears each slot's shirt at time t (substitutions change it)
@@ -487,13 +524,24 @@ export async function createShow({
     }
     const cutNow = cuts.some((c) => lastCutCheck < c && c <= t);
     lastCutCheck = t;
+    const trs = players.map((_, slot) => trackAt(slot, t));
+    separate(trs);
+    // who has the ball at his feet (the dribbling gait): the nearest player to a ball on the ground
+    let carrier = -1;
+    let nearest = 1.3;
+    if (ball.position.y < 0.6 && !(flight && t > flight.t0 + 80)) {
+      trs.forEach((tr, slot) => {
+        const d = tr ? Math.hypot(tr.x - ball.position.x, tr.z - ball.position.z) : Infinity;
+        if (d < nearest) [nearest, carrier] = [d, slot];
+      });
+    }
     for (let slot = 0; slot < players.length; slot++) {
       const pl = players[slot];
-      const tr = trackAt(slot, t);
+      const tr = trs[slot];
       pl.root.visible = Boolean(tr);
       if (!tr) continue;
       pl.update({
-        ...tr, ballX: ball.position.x, ballZ: ball.position.z, tMs: t, dt: matchDt,
+        ...tr, ballX: ball.position.x, ballZ: ball.position.z, tMs: t, dt: matchDt, carrying: slot === carrier,
         event: eventNear(events[slot], t), snap: snapAll || cutNow || matchDt === 0 || tr.jump,
       });
     }
@@ -617,6 +665,9 @@ export async function createShow({
     const shot = [...shotEvents].reverse().find((e) => e[0] <= goal.t && goal.t - e[0] < 4000);
     const plan = planPackage(goal, shot?.[0]);
     plan.scorer = ev ? ev[2] : shot ? shot[2] : -1;
+    // the scorer's celebration: his own style, the next one for his next goal of the match
+    const before = goalEvents.filter((e) => e[2] === plan.scorer && e[0] < goal.t - 1500).length;
+    plan.celebration = celebrationStyle(plan.scorer >= 0 ? identityAt(plan.scorer, goal.t)?.name : "", before);
     // which goal: where the ball was during the strike (the engine may already have reset it at the goal time)
     const [a] = frameAt(feed, plan.strike + 200);
     plan.side = feed.b[a][0] / 10 >= L / 2 ? 1 : -1;
@@ -664,11 +715,15 @@ export async function createShow({
       const pose = poses[s];
       pl.root.visible = Boolean(pose);
       if (!pose) continue;
-      const cel = pose.celebrate;
-      // a celebrating player plays the victory clip from the moment he arrives
-      const event = cel === null || cel === undefined ? null : [tMs - cel * 1000, "celebrate", s, "", "", -1, -1, -1, -1, -1];
+      const cel = pose.celebrate ?? null;
+      // a celebrating player plays the victory clip from the moment he arrives; the scorer makes
+      // his own celebration (a leap replaces the clip, an aeroplane is the run to the corner)
+      const own = s === scorer ? plan.celebration : null;
+      // a leap holds its landing, then the victory clip carries on from there
+      const from = own === "leap" ? LEAP_END : 0;
+      const event = cel === null || cel < from ? null : [tMs - (cel - from) * 1000, "celebrate", s, "", "", -1, -1, -1, -1, -1];
       pl.update({ x: pose.x, z: pose.z, vx: pose.vx, vz: pose.vz, ballX: ball.position.x, ballZ: ball.position.z,
-        tMs, dt: entering ? 0 : wallDt, event, snap: entering });
+        tMs, dt: entering ? 0 : wallDt, event, snap: entering, celebration: own ? { style: own, cel } : null });
     }
     director.setMode("tight");
     if (entering) director.cut();
@@ -707,8 +762,27 @@ export async function createShow({
     // motion QA: where the drawn ball sits against the striking bone and the controlling player
     probe() {
       const out = { ball: ball.position.toArray(), strike: null, carry: null, flight: flight ? [flight.t0, flight.t1, flight.to] : null };
-      const st = players.find((p) => p.root.visible && p.strike && p.strike.w > 0.95);
+      // a strike holds the ball only within reach, as attachBall draws it (the same 2.5 m)
+      const st = players.find((p) => p.root.visible && p.strike && p.strike.w > 0.95
+        && Math.hypot(p.root.position.x - ball.position.x, p.root.position.z - ball.position.z) < 2.5);
       if (st) out.strike = { slot: players.indexOf(st), dist: st.strikePoint(new THREE.Vector3()).distanceTo(ball.position) };
+      // who is acting (a shot, a tackle, a dive), which way they face, and where they stand
+      out.actors = players
+        .map((p, s) => (p.root.visible && p.actionNow ? { slot: s, ...p.actionNow, heading: p.heading, x: p.root.position.x, z: p.root.position.z } : null))
+        .filter(Boolean);
+      // bodies inside one another: pairs closer than two torsos' depth
+      let closest = Infinity;
+      let overlaps = 0;
+      for (let a = 0; a < players.length; a++) {
+        if (!players[a].root.visible) continue;
+        for (let b = a + 1; b < players.length; b++) {
+          if (!players[b].root.visible) continue;
+          const d = Math.hypot(players[a].root.position.x - players[b].root.position.x, players[a].root.position.z - players[b].root.position.z);
+          closest = Math.min(closest, d);
+          if (d < BODY_GAP - 0.1) overlaps++; // shoulder to shoulder is fine; through each other is not
+        }
+      }
+      out.bodies = { closest, overlaps };
       if (controller && carriedOn === frameNo - 1 && controller.root.visible && ball.position.y < 0.6) {
         const dx = ball.position.x - controller.root.position.x;
         const dz = ball.position.z - controller.root.position.z;

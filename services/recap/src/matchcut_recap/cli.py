@@ -97,6 +97,9 @@ def make_part(a: argparse.Namespace) -> tuple[Cut, Path]:
     return cut, part
 
 
+STRIKE_FACING_DEG = 30  # a strike more than this far off its target reads as wrong
+
+
 def motion_report(samples: list[dict[str, Any]], fps: int) -> dict[str, Any]:
     """Score how the drawn ball meets the players over a cut (the realism gate).
 
@@ -147,10 +150,30 @@ def motion_report(samples: list[dict[str, Any]], fps: int) -> dict[str, Any]:
             jumps.append(round(i / fps, 2))
     report["ball_jumps"] = len(jumps)
     report["ball_jump_at_s"] = jumps[:20]
+    # strikes: at the contact frame a shooter (or passer) faces where the ball goes; a scorer
+    # kicking without facing the goal reads at once
+    offs = sorted(
+        a["off"]
+        for s in samples
+        if s
+        for a in s.get("actors", [])
+        if a.get("aims") and "off" in a and abs(a["at"] - a["contact"]) <= 1 / fps
+    )
+    report["strike_facing_off_deg"] = {
+        "median": q(offs, 0.5),
+        "p95": q(offs, 0.95),
+        "max": offs[-1] if offs else None,
+    }
+    # bodies: during play no two players are drawn through one another
+    live = [s for s in samples if s and s.get("kind") == "live"]
+    overlaps = sum(1 for s in live if (s.get("bodies") or {}).get("overlaps"))
+    report["bodies_overlap_frames"] = overlaps
     report["pass"] = bool(
         (not gaps or (q(gaps, 0.95) or 0) <= 0.2)
         and len(behind) <= max(1, len(runs) // 100)
         and len(jumps) <= 2
+        and (not offs or (q(offs, 0.95) or 0) <= STRIKE_FACING_DEG)
+        and overlaps <= max(1, len(live) // 100)
     )
     return report
 

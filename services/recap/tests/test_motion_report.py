@@ -53,3 +53,30 @@ def test_a_ball_that_snaps_between_frames_fails_and_cuts_are_forgiven():
     assert not r["pass"]
     cut = [at(0, 0.0), at(1, 40.0, t=900_000)]  # a cut to other play is not a jump
     assert motion_report(cut, 25)["ball_jumps"] == 0
+
+
+def test_a_strike_that_does_not_face_its_target_fails_the_gate():
+    def shot(off):
+        return {
+            "actors": [{"clip": "kick_soccerball", "at": 0.53, "contact": 0.533, "aims": True, "off": off}]
+        }
+
+    assert motion_report([shot(5) for _ in range(10)], 25)["pass"]
+    r = motion_report([shot(120) for _ in range(10)], 25)  # a scorer kicking away from the goal
+    assert not r["pass"]
+    assert r["strike_facing_off_deg"]["max"] == 120
+
+
+def test_players_drawn_through_each_other_fail_the_gate():
+    def live(i, overlaps):
+        return {
+            "kind": "live",
+            "t": i * 40,
+            "ball": [0, 0.11, 0],
+            "bodies": {"closest": 0.3, "overlaps": overlaps},
+        }
+
+    assert motion_report([live(i, 0) for i in range(200)], 25)["pass"]
+    r = motion_report([live(i, 0) for i in range(180)] + [live(i, 1) for i in range(180, 200)], 25)
+    assert not r["pass"]
+    assert r["bodies_overlap_frames"] == 20
