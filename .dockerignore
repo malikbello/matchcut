@@ -17,6 +17,9 @@ renders
 research
 reports
 out/cuts
+out/pieces
+out/review
+out/journey
 *.zip
 *.pem
 *.key
