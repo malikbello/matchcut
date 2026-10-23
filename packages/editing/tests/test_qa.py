@@ -54,3 +54,22 @@ def test_a_film_that_says_and_shows_its_lines_passes_and_one_that_does_not_fails
         "f", "en", spoken, shown, [(20.0, 21.0, "Here comes Quinouani")], {8.0: "His 9th of the season."}, -16
     )
     assert not late.lines[0]["heard"]  # heard, but not where the plan puts it
+
+
+def test_invented_names_and_near_misses_do_not_fail_a_line_that_was_said():
+    names = ["Kaluamont", "Quinouani"]
+    assert recall("Kaluamont accélère !", "Caluamon accélère.", names) == 1.0  # the name set aside
+    assert recall("BUT ! Quinouani !", "Bat Kinwani", names) == 1.0  # "bat" for "but", shouted
+    assert recall("هدف! Quinouani!", "هدف كونواوني", names) == 1.0  # the name in another script
+    assert recall("Quinouani!", "Kinwani", names) == 1.0  # only a name: something was said there
+    assert recall("Quinouani!", "", names) == 0.0  # and nothing was
+    assert recall("See Kaluamont dey run with am!", "He don't pass one", names) < 0.6  # another line
+
+
+def test_a_language_without_a_recogniser_is_checked_for_being_voiced_and_says_so():
+    spoken = [Spoken(2.9, "See Kaluamont dey run with am!", "call")]
+    voiced = judge("f", "pcm", spoken, [], [(3.2, 4.4, "Si Calyaman Deiran with Ham")], {}, -16.0)
+    assert voiced.passed
+    assert voiced.lines[0]["check"] == "voiced"
+    silent = judge("f", "pcm", spoken, [], [], {}, -16.0)
+    assert not silent.passed  # nothing was said where the plan puts the call

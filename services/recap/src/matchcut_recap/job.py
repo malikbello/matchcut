@@ -204,6 +204,20 @@ def render_slice(
     run_sliced(blobs, work, int(req.get("chunk", 0)), clock, sleep)
 
 
+CROWD = Path("apps/studio/assets/audio/crowd")  # the crowd stems the films are mixed with
+
+
+def _senses() -> Any:
+    """The QA agent's senses (Azure AI Speech and the vision model), when the job has an AI
+    endpoint; on Azure it always has, through its managed identity."""
+    from matchcut_recap.qa_agent import Perception  # noqa: PLC0415
+
+    try:
+        return Perception.from_env()
+    except KeyError:
+        return None
+
+
 def piece_blob(match: str, aspect: str, name: str) -> str:
     return f"pieces/{match}/{aspect}/{name}"
 
@@ -243,7 +257,7 @@ def render_clip(blobs: Any, req: dict[str, Any]) -> None:
     from matchcut_editing.inputs import VOICED, best_cues  # noqa: PLC0415
 
     from matchcut_recap.cli import write_manifest  # noqa: PLC0415
-    from matchcut_recap.clips import finish_clip, render_clip_part  # noqa: PLC0415
+    from matchcut_recap.clips import finish_clip, finish_films, render_clip_part  # noqa: PLC0415
     from matchcut_recap.render import Studio  # noqa: PLC0415
 
     match, aspect, key = req["match"], req["aspect"], req["key"]
@@ -273,11 +287,21 @@ def render_clip(blobs: Any, req: dict[str, Any]) -> None:
 
     def finish(parts: list[Path]) -> None:
         with studio() as st:
-            pieces = finish_clip(st, key, segments_with(st), parts, data, match, VOICED, SCRATCH)
+            segs = segments_with(st)
+            pieces = finish_clip(st, key, segs, parts, data, match, VOICED, SCRATCH)
         for lang, path in pieces.items():
             name = f"{key}.jpg" if lang == "poster" else f"{key}.{lang}.mp4"
             with path.open("rb") as f:
                 blobs.upload_blob(piece_blob(match, aspect, name), f, overwrite=True)
+        # each language's film, mixed and checked by the QA agent before any fan plays it
+        for lang, (film, report) in finish_films(
+            key, segs, data, match, VOICED, SCRATCH, CROWD, _senses()
+        ).items():
+            with film.open("rb") as f:
+                blobs.upload_blob(piece_blob(match, aspect, film.name), f, overwrite=True)
+            if report is not None:
+                qa = json.dumps(report, ensure_ascii=False).encode()
+                blobs.upload_blob(piece_blob(match, aspect, f"{key}.{lang}.qa.json"), qa, overwrite=True)
 
     work = Work(
         unit=f"work/{match}/{aspect}/{key}",

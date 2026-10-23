@@ -330,6 +330,51 @@ def cmd_prewarm(a: argparse.Namespace) -> list[str]:
     return queued
 
 
+def cmd_qa(a: argparse.Namespace) -> list[dict[str, Any]]:
+    """Mix each rendered clip's film in every language and have the QA agent listen to it and read
+    it (as the render job does on Azure); reports are written beside the films."""
+    from matchcut_editing.edl import segments_for  # noqa: PLC0415
+    from matchcut_editing.inputs import VOICED  # noqa: PLC0415
+
+    from matchcut_recap.clips import finish_films  # noqa: PLC0415
+    from matchcut_recap.qa_agent import Perception  # noqa: PLC0415
+
+    data, folder = Path(a.data), _pieces_dir(a)
+    langs = a.langs.split(",") if a.langs else VOICED
+    packages = {
+        int(t): d
+        for t, d in json.loads((folder / "manifest.json").read_text(encoding="utf-8"))["packages"].items()
+    }
+    keys = (
+        a.keys.split(",")
+        if a.keys
+        else sorted(p.name.removesuffix(".clean.mp4") for p in folder.glob("*.clean.mp4"))
+    )
+    senses = Perception.from_env(a.ffmpeg)
+    reports: list[dict[str, Any]] = []
+    for key in keys:
+        films = finish_films(
+            key, segments_for(key, packages), data, a.match, langs, folder, Path(a.crowd), senses, a.ffmpeg
+        )
+        for lang, (_film, report) in sorted(films.items()):
+            if report is None:
+                continue
+            (folder / f"{key}.{lang}.qa.json").write_text(
+                json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8"
+            )
+            lines, caps = report.get("lines", []), report.get("captions", [])
+            heard = f"{sum(x['heard'] for x in lines)}/{len(lines)}"
+            read = f"{sum(x['read'] for x in caps)}/{len(caps)}"
+            verdict = "PASS" if report["passed"] else "FAIL"
+            print(
+                f"{key} {lang}: {verdict}  heard {heard}  read {read}  {report.get('lufs')} LUFS", flush=True
+            )
+            if report.get("error"):
+                print(f"  {report['error']}", flush=True)
+            reports.append(report)
+    return reports
+
+
 def cmd_cards(a: argparse.Namespace) -> list[Path]:
     """Render the title cards (every focus, every language) and the end cards."""
     from matchcut_editing.inputs import VOICED, focuses  # noqa: PLC0415
@@ -403,6 +448,15 @@ def main(argv: list[str] | None = None) -> None:
         c.add_argument("--out", default="out/pieces")
         c.add_argument("--ffmpeg", default=shutil.which("ffmpeg") or "ffmpeg")
         c.add_argument("--gpu-less", action="store_true")
+    qa = sub.add_parser("qa", help="mix each clip's film per language and have the QA agent check it")
+    qa.add_argument("--match", required=True)
+    qa.add_argument("--aspect", choices=["16x9", "9x16"], default="9x16")
+    qa.add_argument("--langs", help="comma-separated; default: every voiced language")
+    qa.add_argument("--keys", help="clip keys; default: every rendered clip")
+    qa.add_argument("--data", default="out")
+    qa.add_argument("--out", default="out/pieces")
+    qa.add_argument("--crowd", default="apps/studio/assets/audio/crowd")
+    qa.add_argument("--ffmpeg", default=shutil.which("ffmpeg") or "ffmpeg")
     w = sub.add_parser("prewarm", help="Azure: queue every moment clip and card set on the render job")
     w.add_argument("--match", required=True)
     w.add_argument("--account", required=True, help="the storage account with the cuts queue")
@@ -411,6 +465,8 @@ def main(argv: list[str] | None = None) -> None:
     w.add_argument("--chunks", type=int, default=4, help="slices per clip (job replicas in parallel)")
     w.add_argument("--data", default="out")
     args = p.parse_args(argv)
+    if args.cmd == "qa":
+        sys.exit(0 if all(r["passed"] for r in cmd_qa(args)) else 1)
     if args.cmd == "prewarm":
         cmd_prewarm(args)
         return

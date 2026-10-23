@@ -7,15 +7,22 @@ and each of the caller's lines (shared films are mostly watched muted), alone on
 page and ffmpeg lays it over the clip with the broadcast fades. Cards are
 stills held for their duration. Every piece is encoded with the same settings, so a fan's cut is
 a lossless join plus a soundtrack mix (matchcut_editing.assembly), done in seconds.
+
+Each clip's film per language (the clip with its calls, verified line and crowd: what a fan plays
+and shares from the reel) is mixed here too, and the QA agent listens to it and reads it before
+it is published (matchcut_recap.qa_agent).
 """
 
 from __future__ import annotations
 
 import gzip
 import json
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import Any
 
-from matchcut_editing.assembly import caption_command, card_command, run
+from matchcut_editing.assembly import assemble_cut, caption_command, card_command, run
 from matchcut_editing.edl import (
     CHANCE_BEFORE_S,
     CONCEDED_BEFORE_S,
@@ -30,6 +37,7 @@ from matchcut_editing.edl import (
 )
 from matchcut_editing.inputs import LANGUAGE_NAMES, load
 
+from matchcut_recap.qa_agent import Perception, league_names, qa_film
 from matchcut_recap.render import Studio, concat
 
 WARMUP_S = 2
@@ -151,3 +159,51 @@ def render_cards(
             run(card_command(still, seg.duration, piece, ffmpeg, fade_in=seg.clip != "end"))
             out[f"{seg.clip}.{lang}"] = piece
     return out
+
+
+def finish_films(
+    key: str,
+    segments: list[Segment],
+    data: Path,
+    match: str,
+    langs: list[str],
+    work: Path,
+    crowd: Path,
+    senses: Perception | None = None,
+    ffmpeg: str = "ffmpeg",
+) -> dict[str, tuple[Path, dict[str, Any] | None]]:
+    """Each language's film of a clip (the captioned clip with its soundtrack) and the QA agent's
+    report on it: {lang: (film, report)}. Languages run side by side; a QA failure is reported,
+    never raised (the film is published either way, and its report says what is wrong)."""
+    packages = {s.goal_t: s.duration for s in segments if s.kind == "package" and s.goal_t is not None}
+
+    def one(lang: str) -> tuple[str, Path, dict[str, Any] | None] | None:
+        clip = work / f"{key}.{lang}.mp4"
+        if not clip.is_file():
+            return None
+        inp = load(data, match, lang)
+        cut = moment_cut(
+            inp.feed, inp.cues, inp.calls, key, language=lang, aspect="",
+            package_durations=packages, clip_durations=inp.durations,
+        )  # fmt: skip
+        film = work / f"{key}.{lang}.share.mp4"
+        with tempfile.TemporaryDirectory() as tmp:
+            assemble_cut(cut, [clip], data / "media", crowd, Path(tmp), ffmpeg).replace(film)
+        report: dict[str, Any] | None = None
+        if senses is not None:
+            try:
+                report = qa_film(
+                    film, cut, inp.cues, inp.calls, lang, senses, league_names(inp.feed)
+                ).as_dict()
+            except Exception as exc:  # perception down is a report, not a failed render
+                report = {
+                    "film": film.name,
+                    "language": lang,
+                    "passed": False,
+                    "error": f"{type(exc).__name__}: {exc}"[:300],
+                }
+        return lang, film, report
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        done = [r for r in pool.map(one, langs) if r]
+    return {lang: (film, report) for lang, film, report in done}

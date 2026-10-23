@@ -180,10 +180,26 @@ class Perception:
 
 
 def qa_film(
-    film: Path, cut: Cut, cues: list[dict], calls: list[dict], language: str, senses: Perception
+    film: Path,
+    cut: Cut,
+    cues: list[dict],
+    calls: list[dict],
+    language: str,
+    senses: Perception,
+    names: list[str] | None = None,
 ) -> QAReport:
     """Listen to the film, read its captions, measure its level, and judge it against its plan."""
+    names = names or []
     spoken, shown = expectations(cut, cues, calls)
     transcript = senses.listen(film, language) if spoken else []
     reads = senses.read(film, [s.middle for s in shown]) if shown else {}
-    return judge(film.name, language, spoken, shown, transcript, reads, loudness(film, senses.ffmpeg))
+    return judge(film.name, language, spoken, shown, transcript, reads, loudness(film, senses.ffmpeg), names)
+
+
+def league_names(feed: dict) -> list[str]:
+    """Every club and player name in a match's feed (the words a recogniser spells its own way)."""
+    teams = [feed["teams"][side] for side in ("home", "away")]
+    out = [t.get("name", "") for t in teams]
+    out += [p.get("name", "") for t in teams for p in t.get("players", {}).values()]
+    out += [p.get("name", "") for p in feed.get("players", {}).values()]
+    return [n for n in out if n]

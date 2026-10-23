@@ -792,6 +792,13 @@ function reelItem(m) {
   const body = el("div", { class: "body" });
   const badge = el("div", { class: "badge" });
   badge.append(el("span", { class: "k" }, REEL_KIND[kind] || "Moment"), el("span", {}, m.clock || ""));
+  if (m.qa) {
+    // the QA agent listened to this film and read it before it reached the reel
+    const label = m.qa.passed ? "Checked" : "Flagged";
+    const chip = el("span", { class: `qa ${m.qa.passed ? "ok" : "flag"}`, title: qaText(m.qa), "aria-label": `${label} by the QA agent: ${qaText(m.qa)}` });
+    chip.append(icon("i-verified"), document.createTextNode(label));
+    badge.append(chip);
+  }
   body.append(badge, el("p", { class: "line", lang: reelLang() }, isolateNumbers(m.text || (kind === "window" ? "The play you clipped" : ""), reelLang())));
   if (m.ready) {
     const acts = el("div", { class: "acts" });
@@ -806,8 +813,12 @@ function reelItem(m) {
   return li;
 }
 
+// what the QA agent found, in a line: "Heard 3/3 lines, read 2/2 captions, -15.9 LUFS"
+const qaText = (q) => `${q.words ? "Heard" : "Voiced"} ${q.heard} lines, read ${q.read} captions, ${q.lufs ?? "?"} LUFS`;
+
 function openMoment(m) {
   reel.open = m;
+  $("moment-qa").textContent = m.qa ? `QA agent: ${m.qa.passed ? "checked" : "flagged"}. ${qaText(m.qa)}.` : "";
   const src = momentUrl(m.key, reelLang());
   $("moment-video").src = src;
   $("moment-download").href = src;

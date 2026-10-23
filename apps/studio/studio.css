@@ -272,6 +272,13 @@ body.render.aspect-9x16 .film-card .fc-sub { font-size: 26px; max-width: 90%; }
 .moment-player video { width: 100%; max-height: 70vh; border-radius: 10px; background: #000; }
 .moment-text { font: 700 15px/1.35 var(--ui); margin: 10px 0; }
 #moment-note { overflow-wrap: anywhere; }
+/* the QA agent's verdict on a moment's film: checked (heard and read as verified) or flagged */
+.reel-item .qa { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; padding: 2px 7px; border-radius: 999px; font: 700 11px/1.4 var(--ui); letter-spacing: 0.02em; }
+.reel-item .qa .icon { width: 12px; height: 12px; }
+.reel-item .qa.ok { color: var(--verified); border: 1px solid color-mix(in srgb, var(--verified) 45%, transparent); }
+.reel-item .qa.flag { color: var(--floodlight); border: 1px solid color-mix(in srgb, var(--floodlight) 45%, transparent); }
+.moment-qa { margin: -4px 0 10px; }
+.moment-qa:empty { display: none; }
 /* wide screens: the vertical film on the left, its words, actions and the QR hand-over beside it */
 @media (min-width: 900px) {
   .moment-player[open] { display: grid; grid-template-columns: max-content 300px; column-gap: 20px; align-content: start; width: fit-content; max-width: 94vw; }
