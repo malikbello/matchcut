@@ -163,37 +163,40 @@ class InsightsPipeline:
         )
 
     async def _localise(self, moment: Moment, english: Cue, report: MomentReport, start: float) -> list[Cue]:
-        """Stage 2: languages in parallel batches; each translation must keep the numbers and names."""
+        """Stage 2: languages in parallel batches; each translation must keep the numbers and names
+        and be written in its language. A language the Verifier turns down gets one more try, on
+        its own (a fan should not lose the line in their language to one bad draft)."""
         names = self.ctx.names()
-        langs = list(self.languages)
-        batches = [langs[i : i + TRANSLATE_BATCH] for i in range(0, len(langs), TRANSLATE_BATCH)]
-        results = await asyncio.gather(
-            *(self.brain.translate(english.text, b) for b in batches), return_exceptions=True
-        )
+        wanted = list(self.languages)
         out: list[Cue] = []
         done: set[str] = set()
-        for batch, items in zip(batches, results, strict=True):
-            if isinstance(items, BaseException):
-                report.translations_rejected += len(batch)
-                continue
-            for tr in items:
-                lang = canonical(tr.language)
-                verdict = verify_translation(english.text, tr.text, names)
-                if lang is None or lang not in batch or lang in done or not verdict.passed:
-                    report.translations_rejected += 1
+        for size in (TRANSLATE_BATCH, 1):
+            missing = [lang for lang in wanted if lang not in done]
+            batches = [missing[i : i + size] for i in range(0, len(missing), size)]
+            results = await asyncio.gather(
+                *(self.brain.translate(english.text, b) for b in batches), return_exceptions=True
+            )
+            for batch, items in zip(batches, results, strict=True):
+                if isinstance(items, BaseException):
                     continue
-                done.add(lang)
-                report.translations_verified += 1
-                out.append(
-                    self._cue(
-                        moment,
-                        lang,
-                        CueStatus.VERIFIED,
-                        tr.text[:280],
-                        english.cited_fact_ids,
-                        english.facts,
-                        verdict.checks,
-                        int((time.perf_counter() - start) * 1000),
+                for tr in items:
+                    lang = canonical(tr.language)
+                    verdict = verify_translation(english.text, tr.text, names, lang or "")
+                    if lang is None or lang not in batch or lang in done or not verdict.passed:
+                        continue
+                    done.add(lang)
+                    report.translations_verified += 1
+                    out.append(
+                        self._cue(
+                            moment,
+                            lang,
+                            CueStatus.VERIFIED,
+                            tr.text[:280],
+                            english.cited_fact_ids,
+                            english.facts,
+                            verdict.checks,
+                            int((time.perf_counter() - start) * 1000),
+                        )
                     )
-                )
+        report.translations_rejected += len([lang for lang in wanted if lang not in done])
         return out

@@ -97,6 +97,9 @@ def _top(moments: list[tuple[Moment, dict[str, Any]]], n: int | None) -> list[tu
 async def cmd_run(args: argparse.Namespace) -> None:
     ctx, moments = moments_with_snapshots(args.home, args.away, args.seed)
     moments = _top(moments, args.max_moments)
+    only = set(args.moments.split(",")) if args.moments else None
+    if only:  # rewrite just these moments; every other line stays as it is
+        moments = [m for m in moments if m[0].moment_id in only]
     async with _brain(args) as brain:
         cues, reports = await run_match(
             brain, ctx, moments, args.languages.split(",") if args.languages else [], memory=_memory(args)
@@ -104,9 +107,18 @@ async def cmd_run(args: argparse.Namespace) -> None:
     if args.voice:
         voiced = voice_cues(cues, AzureSpeech.from_env(), args.media)
         print(f"voiced {voiced} verified lines -> {args.media}/audio")
-    out = Path(args.out or f"out/insights/{moments[0][0].match_id if moments else 'empty'}.jsonl")
+    match_id = ctx.home.club_id.lower() + "-" + ctx.away.club_id.lower() + f"-{args.seed}"
+    out = Path(args.out or f"out/insights/{moments[0][0].match_id if moments else match_id}.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("".join(c.model_dump_json() + "\n" for c in cues), encoding="utf-8")
+    rows = [c.model_dump_json() for c in cues]
+    if only and out.is_file():  # merge: the rewritten moments replace theirs, in time order
+        kept = [
+            ln
+            for ln in out.read_text(encoding="utf-8").splitlines()
+            if ln and json.loads(ln)["moment_id"] not in only
+        ]
+        rows = sorted(kept + rows, key=lambda ln: (json.loads(ln)["t_ms"], json.loads(ln)["moment_id"]))
+    out.write_text("".join(r + "\n" for r in rows), encoding="utf-8")
     for c in cues:
         if c.status != CueStatus.PLAIN or args.verbose:
             print(f"{c.clock:>6} {c.language} {c.status.value:<8} {c.text}")
@@ -275,6 +287,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--voice", action="store_true", help="voice verified lines with Azure AI Speech")
     r.add_argument("--media", default="out/media")
     r.add_argument("--max-moments", type=int, default=12)
+    r.add_argument("--moments", help="rewrite only these moment IDs (MO-00004,...) and merge them in")
     r.add_argument("--out")
     r.add_argument("--verbose", action="store_true")
     e = sub.add_parser("eval", help="score the agents over several matches")

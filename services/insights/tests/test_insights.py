@@ -270,8 +270,25 @@ def test_verified_line_and_translations(match):
     assert report.verified
     assert report.retries == 0
     assert report.translations_verified == 2
-    assert report.translations_rejected == 1
+    assert report.translations_rejected == 0  # an unasked language (de) never airs, and is no loss
     assert all(set(c.cited_fact_ids) == {f.fact_id for f in c.facts} for c in verified)
+
+
+def test_a_language_turned_down_once_gets_one_more_try_on_its_own(match):
+    calls: list[list[str]] = []
+
+    class FirstDraftCopiesEnglish(ScriptedBrain):
+        async def translate(self, text, languages):
+            calls.append(list(languages))
+            if len(calls) == 1:  # the first batch: French comes back with an English ordinal
+                return [Translation(language=lang, text=f"[{lang}] {text} 9th") for lang in languages]
+            return [Translation(language=lang, text=f"[{lang}] {text}") for lang in languages]
+
+    brain = FirstDraftCopiesEnglish([_good_line(match)])
+    cues, report = _run(brain, match, languages=("fr",))
+    assert [c.language for c in cues if c.status == CueStatus.VERIFIED] == ["en", "fr"]
+    assert calls == [["fr"], ["fr"]]
+    assert (report.translations_verified, report.translations_rejected) == (1, 0)
 
 
 def test_verifier_feedback_fixes_a_bad_first_draft(match):
@@ -443,8 +460,18 @@ def test_a_goal_s_history_is_quotable_and_grounded_by_its_query():
     }
     facts = goal_history_facts(answer)
     by_label = {f.label: f.value for f in facts}
-    assert by_label["his league goal of the season, counting this one"] == 8  # "his 8th": no maths left
+    assert by_label["which league goal of his season this is (say it as 8th, 9th)"] == 8  # no maths left
     assert by_label["his goals in this match, counting this one"] == 2
     assert by_label["a career milestone, his league goals in all"] == 50
     assert all(f.source == "league_memory" and f.evidence_ids[0] == "LM-abc1234567" for f in facts)
     assert len({f.fact_id for f in facts}) == len(facts)
+
+
+def test_a_translation_that_copies_english_ordinals_does_not_air():
+    src = "Quinouani's 9th league goal gives Kestrel Bay FC a 2-0 lead in the 74th minute."
+    copied = "Quinouani's 9th league goal, donne Kestrel Bay FC 2-0 in the 74th minute."
+    good = "9e but de la saison pour Quinouani: Kestrel Bay FC mène 2-0 à la 74e minute."
+    assert not verify_translation(src, copied, ["Quinouani", "Kestrel Bay FC"], "fr").checks["translated"]
+    assert verify_translation(src, good, ["Quinouani", "Kestrel Bay FC"], "fr").checks["translated"]
+    pidgin = "Quinouani don score im 9th league goal, Kestrel Bay FC dey lead 2-0 for 74th minute."
+    assert verify_translation(src, pidgin, ["Quinouani", "Kestrel Bay FC"], "pcm").checks["translated"]
