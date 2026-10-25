@@ -18,7 +18,7 @@ Requires [uv](https://docs.astral.sh/uv/). Python 3.12 is installed automaticall
 
 ```bash
 uv sync                                   # install the locked workspace
-uv run matchcut-sim league                # 26 clubs, five seasons of history -> data/league
+uv run matchcut-sim league                # 20 clubs, five seasons of history -> data/league
 uv run matchcut-memory-build              # League Memory database -> data/league/memory.sqlite
 uv run matchcut-sim match --home kes --away irv --seed 7   # one full match: events, 10 Hz tracking, truth
 uv run matchcut-sim realism --matches 12  # compare simulated matches with top-flight norms
