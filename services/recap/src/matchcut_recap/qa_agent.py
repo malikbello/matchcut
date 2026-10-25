@@ -30,19 +30,20 @@ from matchcut_editing.qa import QAReport, expectations, judge
 
 STT_PATH = "/speechtotext/transcriptions:transcribe?api-version=2024-11-15"
 CHAT_API = "2025-04-01-preview"
-# the recogniser's locale for each film language (Pidgin is heard with the Nigerian English model)
 RETRY_STATUS = {429, 500, 502, 503, 504}  # throttled or briefly unavailable: worth another try
 RETRIES = 8  # about 2 minutes of waiting at most, when many films are checked at once
-LOCALES = {
-    "en": "en-GB",
-    "en-NG": "en-NG",
-    "pcm": "en-NG",
-    "fr": "fr-FR",
-    "es": "es-ES",
-    # European Portuguese fast transcription answered 429 "Resource Exhausted" on this resource
-    # even when idle (25 Oct); the Brazilian recogniser hears the lines well enough to check words
-    "pt": "pt-BR",
-    "ar": "ar-SA",
+# the recognisers for each film language, in order of preference; a retry moves to the next one
+# (Pidgin is heard with the Nigerian English model). Portuguese fast transcription in our region
+# answers 429 "Resource Exhausted" for one recogniser or the other for hours at a time (25 Oct);
+# the Brazilian one hears the European Portuguese lines well enough to check their words
+LOCALES: dict[str, tuple[str, ...]] = {
+    "en": ("en-GB",),
+    "en-NG": ("en-NG",),
+    "pcm": ("en-NG",),
+    "fr": ("fr-FR",),
+    "es": ("es-ES",),
+    "pt": ("pt-PT", "pt-BR"),
+    "ar": ("ar-SA",),
 }
 READER = (
     "You transcribe on-screen text for a quality check. Write every word visible in the image, "
@@ -100,14 +101,18 @@ class Perception:
             self.client = httpx.Client(timeout=120)
         return self.client
 
-    def _post(self, url: str, **kwargs: Any) -> httpx.Response:
+    def _post(
+        self, url: str, vary: Callable[[int], dict[str, Any]] | None = None, **kwargs: Any
+    ) -> httpx.Response:
         """A request that waits out throttling: Azure AI answers 429 when many films are checked
         at once (a Recap Factory run checks twenty side by side). Retry-After is honoured;
-        otherwise the wait doubles, with jitter so replicas do not retry in step."""
+        otherwise the wait doubles, with jitter so replicas do not retry in step. `vary` gives
+        each attempt's own arguments (another recogniser for the same language)."""
         for attempt in range(RETRIES):
             last = attempt == RETRIES - 1
+            args = {**kwargs, **(vary(attempt) if vary else {})}
             try:
-                r = self.http.post(url, headers={"Authorization": f"Bearer {self.token()}"}, **kwargs)
+                r = self.http.post(url, headers={"Authorization": f"Bearer {self.token()}"}, **args)
             except httpx.TransportError:
                 if last:
                     raise
@@ -146,14 +151,16 @@ class Perception:
             )
             if usage is not None:  # 16 kHz mono 16-bit after a 44-byte header
                 usage["audio_s"] = usage.get("audio_s", 0) + max(0, wav.stat().st_size - 44) / 32000
-            definition = json.dumps({"locales": [LOCALES.get(language, "en-GB")]})
-            r = self._post(
-                self.endpoint + STT_PATH,
-                files={
-                    "audio": ("sound.wav", wav.read_bytes(), "audio/wav"),
-                    "definition": (None, definition),
-                },
-            )
+            audio = wav.read_bytes()
+            locales = LOCALES.get(language, ("en-GB",))
+
+            def attempt(i: int) -> dict[str, Any]:
+                definition = json.dumps({"locales": [locales[i % len(locales)]]})
+                return {
+                    "files": {"audio": ("sound.wav", audio, "audio/wav"), "definition": (None, definition)}
+                }
+
+            r = self._post(self.endpoint + STT_PATH, vary=attempt)
         return [
             (
                 p["offsetMilliseconds"] / 1000,

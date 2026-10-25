@@ -40,7 +40,8 @@ def test_a_run_reads_back_as_the_screen_shows_it():
         "home.ar": {"status": "making", "started": 104},
     }
     st = run_state(run, films, now=180)
-    assert st["counts"] == {"waiting": 1, "making": 1, "checked": 1, "flagged": 1, "failed": 0}
+    counts = {"waiting": 1, "making": 1, "checked": 1, "flagged": 1, "unchecked": 0, "failed": 0}
+    assert st["counts"] == counts
     assert not st["finished"]
     assert st["first_film_s"] == 60
     assert st["all_films_s"] is None
@@ -71,3 +72,13 @@ def test_only_players_with_a_moment_of_their_own_get_a_film():
     }
     focuses = [{"side": "home"}, {"side": "away"}, {"player": "Quinouani"}, {"player": "Toredor"}]
     assert featured_focuses(feed, [], focuses) == focuses[:3]
+
+
+def test_a_film_the_qa_agent_could_not_hear_is_not_checked_rather_than_flagged():
+    run = {"run": "f-000000000003", "started": 0.0, "films": plan([{"side": "home"}], ["en", "pt"])}
+    unheard = {**_done(1, 30, passed=False), "qa": {"passed": False, "issues": [{"kind": "not checked"}]}}
+    st = run_state(run, {"home.en": _done(1, 30), "home.pt": unheard}, now=40)
+    assert [f["status"] for f in st["films"]] == ["checked", "unchecked"]
+    assert st["counts"]["unchecked"] == 1
+    assert st["qa_passed"] == "1/1"  # judged films only
+    assert st["finished"]

@@ -100,8 +100,8 @@ function render() {
     `${pieces.moments ?? ""} moment clips rendered once during the match, mixed in the fan's language, ` +
     `then listened to and read by the QA agent before any fan sees it.`;
 
-  const c = run.counts || { waiting: films.length, making: 0, checked: 0, flagged: 0, failed: 0 };
-  const made = c.checked + c.flagged;
+  const c = { waiting: films.length, making: 0, checked: 0, flagged: 0, unchecked: 0, failed: 0, ...run.counts };
+  const made = c.checked + c.flagged + c.unchecked;
   $("s-made").textContent = `${made}/${run.total ?? films.length}`;
   const peak = run.peak_replicas || 0;
   $("s-replicas").textContent = run.run && !run.finished ? String(c.making) : String(peak);
@@ -113,7 +113,9 @@ function render() {
   $("s-cost-label").textContent = cost
     ? `Per film: compute ${dollars(cost.compute)}, QA ${dollars(cost.qa)}`
     : "Per film, list price";
-  $("s-qa").textContent = made ? `${c.checked}/${made}` : "–";
+  const judged = c.checked + c.flagged;
+  $("s-qa").textContent = judged ? `${c.checked}/${judged}` : "–";
+  $("s-qa-label").textContent = c.unchecked ? `Passed QA · ${c.unchecked} not checked yet` : "Passed QA";
 
   renderButton();
   renderChart();
@@ -183,11 +185,12 @@ function renderGrid(films, langs) {
 
 function cell(f, label) {
   if (!f) return "";
-  const done = f.status === "checked" || f.status === "flagged";
+  const done = f.status === "checked" || f.status === "flagged" || f.status === "unchecked";
   const b = el("button", { type: "button", class: `f-cell ${f.status}`, disabled: done ? null : "" });
   const name = `${label}, ${LANGS[f.lang] || f.lang}`;
   if (f.status === "checked") b.append(icon("i-verified"));
   else if (f.status === "flagged") b.append(icon("i-flag"));
+  else if (f.status === "unchecked") b.append(el("span", { class: "pip" }));
   else b.append(el("span", { class: "pip" }));
   b.append(el("span", { class: "t" }, f.at != null ? `${Math.round(f.at)}s` : ""));
   b.setAttribute("aria-label", `${name}: ${f.status}`);
@@ -199,7 +202,8 @@ function cell(f, label) {
 function openFilm(f, label) {
   const run = state.run;
   $("f-video").src = `/media/factory/${encodeURIComponent(state.match)}/${ASPECT}/${run.run}/${f.id}.mp4`;
-  $("f-film-kicker").textContent = `${LANGS[f.lang] || f.lang} · ${f.status === "checked" ? "Checked" : "Flagged"}`;
+  const verdict = { checked: "Checked", flagged: "Flagged", unchecked: "Not checked yet" }[f.status] || "";
+  $("f-film-kicker").textContent = `${LANGS[f.lang] || f.lang} · ${verdict}`;
   $("f-film-title").textContent = f.focus.side ? `${label} fans` : label;
   const q = f.qa || {};
   const facts = [

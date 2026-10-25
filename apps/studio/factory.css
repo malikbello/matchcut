@@ -45,6 +45,7 @@
 .f-cell.checked { border-color: rgba(45, 227, 160, 0.5); color: var(--verified); background: rgba(45, 227, 160, 0.1); cursor: pointer; animation: cellIn 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 .f-cell.flagged { border-color: var(--floodlight); color: var(--floodlight); background: rgba(255, 181, 71, 0.12); cursor: pointer; animation: cellIn 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
 .f-cell.failed { border-color: var(--signal); color: var(--signal); }
+.f-cell.unchecked { border-style: dashed; border-color: var(--ink-600); color: var(--mist); cursor: pointer; }
 .f-cell.checked:hover, .f-cell.flagged:hover { transform: translateY(-1px); }
 .f-cell .icon { width: 16px; height: 16px; }
 .f-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
@@ -52,6 +53,7 @@
 .f-legend .dot.making { background: var(--floodlight); }
 .f-legend .dot.checked { background: var(--verified); }
 .f-legend .dot.flagged { background: transparent; border: 2px solid var(--floodlight); }
+.f-legend .dot.unchecked { background: transparent; border: 2px dashed var(--mist); }
 .f-foot { margin: 12px 0 0; }
 @keyframes cellIn { from { transform: scale(0.86); opacity: 0.4; } }
 

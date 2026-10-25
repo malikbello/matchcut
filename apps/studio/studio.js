@@ -794,8 +794,11 @@ function reelItem(m) {
   badge.append(el("span", { class: "k" }, REEL_KIND[kind] || "Moment"), el("span", {}, m.clock || ""));
   if (m.qa) {
     // the QA agent listened to this film and read it before it reached the reel
-    const label = m.qa.passed ? "Checked" : "Flagged";
-    const chip = el("span", { class: `qa ${m.qa.passed ? "ok" : "flag"}`, title: qaText(m.qa), "aria-label": `${label} by the QA agent: ${qaText(m.qa)}` });
+    // not checked: the AI service had no capacity to hear or read it (not a fault in the film)
+    const unheard = !m.qa.passed && (m.qa.issues || []).some((i) => i.kind === "not checked");
+    const label = m.qa.passed ? "Checked" : unheard ? "Not checked yet" : "Flagged";
+    const tone = m.qa.passed ? "ok" : unheard ? "wait" : "flag";
+    const chip = el("span", { class: `qa ${tone}`, title: qaText(m.qa), "aria-label": `${label} by the QA agent: ${qaText(m.qa)}` });
     chip.append(icon("i-verified"), document.createTextNode(label));
     badge.append(chip);
   }
