@@ -351,3 +351,38 @@ def test_a_verified_caption_has_the_screen_over_a_call_line():
     calls = [{"audio": "a.mp3", "text": "Here comes Quinouani!"}, {"audio": "b.mp3", "text": "It's in!"}]
     # the first line gives way when the caption arrives; the second is heard over it, not shown
     assert call_lines(cut, calls) == [(4.5, 6.0, "Here comes Quinouani!")]
+
+
+def test_the_master_is_measured_then_set_with_the_measurement():
+    from matchcut_editing.mix import loudness_report  # noqa: PLC0415
+
+    cut = build_cut(FEED, CUES, CALLS, focus={"side": "home"}, language="en", aspect="9x16",
+                    package_durations=PACKAGES, clip_durations={})  # fmt: skip
+    first = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"), measure=True)
+    assert first[-3:] == ["-f", "null", "-"]
+    assert "print_format=json" in first[first.index("-filter_complex") + 1]
+    log = """noise
+[Parsed_loudnorm_0 @ 0x1]
+{
+ "input_i" : "-18.20",
+ "input_tp" : "-4.10",
+ "input_lra" : "3.40",
+ "input_thresh" : "-28.50",
+ "target_offset" : "0.20"
+}
+"""
+    measured = loudness_report(log)
+    assert measured == {
+        "input_i": -18.2,
+        "input_tp": -4.1,
+        "input_lra": 3.4,
+        "input_thresh": -28.5,
+        "target_offset": 0.2,
+    }
+    second = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"), measured=measured)
+    graph = second[second.index("-filter_complex") + 1]
+    assert "measured_I=-18.2:measured_TP=-4.1" in graph
+    assert graph.count("linear=true") == 1
+    assert second[-1] == "out.m4a"
+    assert loudness_report(log.replace("-18.20", "-inf")) is None  # silence: one pass instead
+    assert loudness_report("no report") is None

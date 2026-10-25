@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Thu 22 Oct 2026 · **Phase:** D6 (Azure live) on `d5/fan-cuts`; D4 and D5 merged (#8)
+**Updated:** Sun 25 Oct 2026 · **Phase:** D2 and D3 done, releasing eaf5514; E (demo and submission) waits for Malik. Branch `d5/fan-cuts` (PR #10, Malik merges)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -14,6 +14,16 @@
   - Agent-based match engine: 10 Hz tracking, offside line, low block, pressing, tackles, fouls, cards, substitutions, set pieces, hidden tactical change, true shot probabilities.
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
+
+## Resume here (handoff, 25 Oct)
+- **D2 QA agent, done:** every moment film is mixed per language on the render job and checked there (Azure AI Speech hears it, gpt-5-mini reads its captions, ffmpeg measures loudness; code judges): `{key}.{lang}.qa.json` beside each film; the reel shows Checked or Flagged with what failed. ADR-0014. The listening window now follows each line's voice length (a fixed 6 s window marked the tail of a 10 s line unheard).
+- **D3 Recap Factory, done:** `/factory.html` (link in the Studio bar). One run = every film with a story (both clubs and each player with a moment of their own, 7 languages: 21 films for kes-wcr-7), one `fan` queue message and one job replica per film; each replica joins, mixes, QA-checks and prices its film (replica lifetime at the Container Apps rate, audio seconds and tokens at Speech and gpt-5-mini list prices). Rationed: one run at a time, 30 min cooldown, 6 a day. Local run (25 Oct): 80.7 s film in 65 s, US$0.032 a film. ADR-0015. Cuts for players with no moment are refused (35 of 36 players in kes-wcr-7).
+- **Images:** the API image now ships factory.html/js/css (it copied only the Studio's three files); uv downloads live in a BuildKit cache with a 5 min timeout (a slow connection failed four builds on 25 Oct).
+- **Bicep:** `studioMinReplicas` (bicepparam default 1 while judged: no cold start), the job's size set once and passed to it for pricing.
+- **First Azure QA pass on eaf5514 (25 Oct): 22 of 28 moment films passed**, and every flag was real: 4 Portuguese films not checked (Azure Speech answered 429 when four clips finished together), 2 short conceded films at -18.1 and -18.2 LUFS (one-pass loudnorm lands low on 6.5 s clips), 1 Nigerian English call heard as "Quinuani is in Angkor" for "in on goal" (kept strict: it stays flagged, with what was heard). Fixed: the QA agent waits out 429 and 5xx (Retry-After, else doubling backoff with jitter), the mix measures then normalises (two-pass: short clips now -16.0 to -16.4), reports keep what was heard and read.
+- **Release eaf5514 (25 Oct):** images built locally and pushed; then deploy.sh, delete the 4 moment clips (goal and conceded, 3274800 and 4525700: realism changed every frame; titles and end cards kept), prewarm, run the factory once on Azure and check its films.
+- **Before submission (needs doing):** the architecture page and diagram still show the planned design (Event Hubs, HLS, a separate qa-job, SAS links, ghcr.io); redraw to the built system. Repo goes public on submission day (check history for secrets and Mixamo-derived files first). Malik merges PR #10, then Dependabot #9. Tag v0.9.0 at the deployed commit. Docker disk (~7 GB) kept for build cache; delete after the last build.
+- **Azure spend, month to date (25 Oct):** about US$4.08 of credit (Speech 2.37, models 0.78, registry 0.93, storage 0.01; Container Apps inside the free grant).
 
 ## Resume here (handoff, 22 Oct evening): working through Malik's six points
 - **Fixed in code (points 1 to 3):** arms (Rocketbox rest-pose matching), bodies held out of the net, pass flights, a pitch-side close camera near goals, behind-goal framing 10 m on phones.
