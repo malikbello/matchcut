@@ -49,8 +49,10 @@ function turfTexture(renderer) {
   for (const gx of [1.5, L - 1.5]) wear(gx, W / 2, 5, 3.5, 0.42);
   for (const px of [11, L - 11]) wear(px, W / 2, 1.6, 1.6, 0.35);
   wear(L / 2, W / 2, 2.2, 2.2, 0.25);
-  c.strokeStyle = "rgba(245,247,242,0.92)";
-  c.fillStyle = "rgba(245,247,242,0.92)";
+  // painted lines, not light: off-white and slightly translucent, so floodlights and bloom never
+  // make them glow (a glowing penalty spot reads on TV as a second ball)
+  c.strokeStyle = "rgba(232,236,228,0.82)";
+  c.fillStyle = "rgba(232,236,228,0.82)";
   c.lineWidth = 0.12 * PX;
   c.strokeRect(X(0), Y(0), L * PX, W * PX);
   c.beginPath();
@@ -62,7 +64,7 @@ function turfTexture(renderer) {
   c.stroke();
   const spot = (x, y) => {
     c.beginPath();
-    c.arc(X(x), Y(y), 0.22 * PX, 0, Math.PI * 2);
+    c.arc(X(x), Y(y), 0.11 * PX, 0, Math.PI * 2); // a 22 cm mark: the size of the ball, never bigger
     c.fill();
   };
   spot(L / 2, W / 2);

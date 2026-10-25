@@ -26,9 +26,10 @@ export const GEARS = [
 export const IDLE = { outfield: "offensive_idle", keeper: "goalkeeper_idle" };
 
 function stripRootMotion(clip) {
-  // keep the hips' height (crouches, dives) but remove travel on the ground plane (Mixamo: Hips, game rig: pelvis)
+  // keep the hips' height (crouches, dives) but remove travel on the ground plane
+  // (Mixamo: Hips, Quaternius: pelvis, Rocketbox Biped: Bip01_Pelvis)
   for (const track of clip.tracks) {
-    if (!/(Hips|pelvis)\.position$/.test(track.name)) continue;
+    if (!/(Hips|pelvis)\.position$/i.test(track.name)) continue;
     const v = track.values;
     const x0 = v[0];
     const z0 = v[2];
@@ -40,6 +41,22 @@ function stripRootMotion(clip) {
   return clip;
 }
 
+// Rocketbox kit masks (garment regions and the back's name panel) and the fitted UV-to-panel maps
+async function loadKits(base) {
+  const fits = await fetch(`${base}/kits.json`).then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))));
+  const loader = new THREE.TextureLoader();
+  const kits = {};
+  for (const code of Object.keys(fits)) {
+    const mask = await loader.loadAsync(`${base}/kit_${code}.png`);
+    mask.flipY = false; // glTF UVs: v runs down the image
+    mask.colorSpace = THREE.NoColorSpace;
+    mask.magFilter = mask.minFilter = THREE.NearestFilter; // region ids must never blend
+    mask.generateMipmaps = false;
+    kits[code] = { mask, decal: fits[code].decal };
+  }
+  return kits;
+}
+
 export async function loadLibrary({ privateBase, publicBase }) {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
   try {
@@ -49,13 +66,23 @@ export async function loadLibrary({ privateBase, publicBase }) {
     ]);
     const clips = new Map(gltf.animations.map((c) => [c.name, stripRootMotion(c)]));
     for (const l of LOCOMOTION) l.speed = Math.max(1.6, meta[l.clip]?.root_speed ?? 2.4);
-    return { kind: "football", scene: gltf.scene, clips, meta };
+    let rig = "quaternius";
+    gltf.scene.traverse((o) => {
+      if (o.isBone && /^Bip01/.test(o.name)) rig = "rocketbox";
+    });
+    const kits = rig === "rocketbox" ? await loadKits(privateBase) : null;
+    return { kind: "football", rig, scene: gltf.scene, clips, meta, kits };
   } catch (err) {
     console.warn("football library unavailable, using the CC0 library", err);
     const gltf = await loader.loadAsync(`${publicBase}/players.glb`);
     return { kind: "cc0", scene: gltf.scene, clips: new Map(gltf.animations.map((c) => [c.name, c])), meta: {} };
   }
 }
+
+// A keeper's dive to each side and the second of the clip he is at full stretch, read off renders
+// with the motion probe (the meta's contact frame is the hand's fastest moment, at the launch):
+// diving_save 1.0 s (measured, kes-wcr-7 75'); diving_save_2 1.5 s (its launch is 0.47 s later)
+const DIVES = { right: ["goalkeeper_diving_save_2", 1.5], left: ["goalkeeper_diving_save", 1.0] };
 
 // Pick the clip for an on-ball event. Returns { clip, faceTarget } or null.
 export function actionFor(ev, { keeper, speed, meta }) {
@@ -83,8 +110,13 @@ export function actionFor(ev, { keeper, speed, meta }) {
       return { clip: outcome === "success" ? pick("goalkeeper_catch", "goalkeeper_diving_save") : pick("goalkeeper_diving_save"), faceTarget: false, dive: true };
     case "goal":
       return keeper ? { clip: pick("goalkeeper_miss", "goalkeeper_diving_save_2"), faceTarget: false } : null;
+    case "beaten": { // the keeper a goal beats: a full-stretch dive that never touches the ball
+      if (!keeper) return null;
+      const [clip, stretch] = DIVES[body === "right" ? "right" : "left"];
+      return pick(clip) ? { clip, faceTarget: true, beaten: true, stretch } : null;
+    }
     case "tackle":
-      return { clip: speed > 2 ? pick("soccer_tackle_2", "soccer_tackle") : pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false };
+      return { clip: speed > 2 ? pick("soccer_tackle_2", "soccer_tackle") : pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false, faceBall: true };
     case "interception":
     case "ball_recovery":
       return { clip: pick("receive", "receive_soccerball"), faceTarget: false };
@@ -92,8 +124,8 @@ export function actionFor(ev, { keeper, speed, meta }) {
       return { clip: keeper ? pick("goalkeeper_body_block") : pick("soccer_tackle_3", "goalkeeper_body_block_2"), faceTarget: false };
     case "throw_in":
       return { clip: pick("throw_in"), faceTarget: true };
-    case "foul":
-      return { clip: pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false };
+    case "foul": // on the player, not the ball: the ball is never drawn onto the fouler's foot
+      return { clip: pick("soccer_tackle", "soccer_tackle_3"), faceTarget: false, faceBall: true, offBall: true };
     case "celebrate":
       return { clip: pick("victory"), faceTarget: false, celebrate: true };
     case "fouled":

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import gzip
 import io
 import json
 import statistics
@@ -19,12 +20,13 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from matchcut_contracts import Cue, CueStatus, Moment
+from matchcut_contracts import Cue, CueStatus, Moment, MomentKind
+from matchcut_memory import LeagueMemory
 from matchcut_sim import build_league, simulate_match
 from matchcut_sim.cli import replay_analytics
 
 from matchcut_insights.brain import AgentBrain, Brain
-from matchcut_insights.calls import build_calls
+from matchcut_insights.calls import build_calls, dribble_calls
 from matchcut_insights.facts import MatchContext
 from matchcut_insights.pipeline import InsightsPipeline, MomentReport
 from matchcut_insights.redteam import red_team, report_markdown
@@ -42,6 +44,11 @@ def moments_with_snapshots(
     m = simulate_match(league, home, away, seed=seed)
     found: list[tuple[Moment, dict[str, Any]]] = []
     replay_analytics(m, on_moment=lambda mo, snap: found.append((mo, snap)))
+    scored: dict[str, int] = {}  # a scorer's earlier goals today: his second is numbered as such
+    for i, (mo, snap) in enumerate(found):
+        if mo.kind == MomentKind.GOAL and mo.player_id:
+            found[i] = (mo, {**snap, "scorer_goals_before": scored.get(mo.player_id, 0)})
+            scored[mo.player_id] = scored.get(mo.player_id, 0) + 1
     ids = set(m.meta.home_lineup + m.meta.away_lineup + m.meta.home_bench + m.meta.away_bench)
     ctx = MatchContext(
         home=league.club(home),
@@ -57,8 +64,9 @@ async def run_match(
     moments: Sequence[tuple[Moment, dict[str, Any]]],
     languages: Sequence[str],
     concurrency: int = 4,
+    memory: Any | None = None,
 ) -> tuple[list[Cue], list[MomentReport]]:
-    pipe = InsightsPipeline(brain, ctx, languages=languages)
+    pipe = InsightsPipeline(brain, ctx, languages=languages, memory=memory)
     gate = asyncio.Semaphore(concurrency)
 
     async def one(mo: Moment, snap: dict[str, Any]) -> tuple[list[Cue], MomentReport]:
@@ -74,6 +82,11 @@ def _brain(args: argparse.Namespace) -> AgentBrain:
     return AgentBrain.from_env(memory_db=args.memory_db)
 
 
+def _memory(args: argparse.Namespace) -> LeagueMemory | None:
+    """League Memory read in-process, for the history every goal gets in code."""
+    return LeagueMemory(args.memory_db) if args.memory_db and Path(args.memory_db).is_file() else None
+
+
 def _top(moments: list[tuple[Moment, dict[str, Any]]], n: int | None) -> list[tuple[Moment, dict[str, Any]]]:
     if not n:
         return moments
@@ -84,16 +97,28 @@ def _top(moments: list[tuple[Moment, dict[str, Any]]], n: int | None) -> list[tu
 async def cmd_run(args: argparse.Namespace) -> None:
     ctx, moments = moments_with_snapshots(args.home, args.away, args.seed)
     moments = _top(moments, args.max_moments)
+    only = set(args.moments.split(",")) if args.moments else None
+    if only:  # rewrite just these moments; every other line stays as it is
+        moments = [m for m in moments if m[0].moment_id in only]
     async with _brain(args) as brain:
         cues, reports = await run_match(
-            brain, ctx, moments, args.languages.split(",") if args.languages else []
+            brain, ctx, moments, args.languages.split(",") if args.languages else [], memory=_memory(args)
         )
     if args.voice:
         voiced = voice_cues(cues, AzureSpeech.from_env(), args.media)
         print(f"voiced {voiced} verified lines -> {args.media}/audio")
-    out = Path(args.out or f"out/insights/{moments[0][0].match_id if moments else 'empty'}.jsonl")
+    match_id = ctx.home.club_id.lower() + "-" + ctx.away.club_id.lower() + f"-{args.seed}"
+    out = Path(args.out or f"out/insights/{moments[0][0].match_id if moments else match_id}.jsonl")
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text("".join(c.model_dump_json() + "\n" for c in cues), encoding="utf-8")
+    rows = [c.model_dump_json() for c in cues]
+    if only and out.is_file():  # merge: the rewritten moments replace theirs, in time order
+        kept = [
+            ln
+            for ln in out.read_text(encoding="utf-8").splitlines()
+            if ln and json.loads(ln)["moment_id"] not in only
+        ]
+        rows = sorted(kept + rows, key=lambda ln: (json.loads(ln)["t_ms"], json.loads(ln)["moment_id"]))
+    out.write_text("".join(r + "\n" for r in rows), encoding="utf-8")
     for c in cues:
         if c.status != CueStatus.PLAIN or args.verbose:
             print(f"{c.clock:>6} {c.language} {c.status.value:<8} {c.text}")
@@ -121,7 +146,7 @@ async def cmd_eval(args: argparse.Namespace) -> None:
         for i in range(args.matches):
             ctx, moments = moments_with_snapshots(ids[(5 * i) % 20], ids[(5 * i + 7) % 20], 500 + i)
             cues, reps = await run_match(
-                brain, ctx, _top(moments, args.max_moments), args.languages.split(",")
+                brain, ctx, _top(moments, args.max_moments), args.languages.split(","), memory=_memory(args)
             )
             reports += reps
             en = [c for c in cues if c.status == CueStatus.VERIFIED and c.language == "en"]
@@ -236,6 +261,9 @@ def cmd_calls(args: argparse.Namespace) -> None:
     m = simulate_match(league, args.home, args.away, seed=args.seed)
     names = {p.player_id: p.known_as for p in league.players if p.player_id in set(m.player_ids)}
     calls = build_calls(m.meta.match_id, m.events, names)
+    feed_path = Path(args.feeds) / f"{m.meta.match_id}.json.gz"
+    if feed_path.is_file():  # solo runs come from the tracking feed
+        calls += dribble_calls(m.meta.match_id, json.loads(gzip.decompress(feed_path.read_bytes())))
     if args.voice:
         voiced = voice_calls(calls, m.meta.match_id, AzureSpeech.from_env(), args.media)
         print(f"voiced {voiced} calls -> {args.media}/audio/{m.meta.match_id}")
@@ -243,6 +271,16 @@ def cmd_calls(args: argparse.Namespace) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps([c.as_dict() for c in calls], ensure_ascii=False, indent=0), encoding="utf-8")
     print(f"{len(calls)} calls in {len({c.language for c in calls})} languages -> {out}")
+
+
+def cmd_voice(args: argparse.Namespace) -> None:
+    """Voice a match's verified lines again wherever the words changed since they were voiced
+    (no line is rewritten): every voice file says what its caption says."""
+    path = Path(args.cues or f"out/insights/{args.match}.jsonl")
+    cues = [Cue.model_validate_json(x) for x in path.read_text(encoding="utf-8").splitlines() if x.strip()]
+    voiced = voice_cues(cues, AzureSpeech.from_env(), args.media)
+    path.write_text("".join(c.model_dump_json() + "\n" for c in cues), encoding="utf-8")
+    print(f"{voiced} verified lines voiced and current -> {args.media}/audio/{args.match}")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -259,6 +297,7 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("--voice", action="store_true", help="voice verified lines with Azure AI Speech")
     r.add_argument("--media", default="out/media")
     r.add_argument("--max-moments", type=int, default=12)
+    r.add_argument("--moments", help="rewrite only these moment IDs (MO-00004,...) and merge them in")
     r.add_argument("--out")
     r.add_argument("--verbose", action="store_true")
     e = sub.add_parser("eval", help="score the agents over several matches")
@@ -278,7 +317,15 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--voice", action="store_true", help="voice the calls with Azure AI Speech")
     c.add_argument("--media", default="out/media")
     c.add_argument("--out-dir", default="out/calls")
+    c.add_argument("--feeds", default="out/feeds", help="tracking feeds, for the calls over solo runs")
+    v = sub.add_parser("voice", help="voice a match's lines again wherever the words changed")
+    v.add_argument("--match", required=True)
+    v.add_argument("--cues", help="the match's lines (default out/insights/<match>.jsonl)")
+    v.add_argument("--media", default="out/media")
     args = p.parse_args(argv)
+    if args.cmd == "voice":
+        cmd_voice(args)
+        return
     if args.cmd == "redteam":
         cmd_redteam(args)
         return

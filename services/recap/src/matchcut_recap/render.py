@@ -14,18 +14,32 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from matchcut_editing.assembly import mux_command, run
 from playwright.sync_api import Page, sync_playwright
 
 SIZES = {"16x9": (1280, 720), "9x16": (720, 1280)}
+# Films render at one fixed quality for the whole cut. Measured on CPU (Mesa llvmpipe, 720x1280):
+# High 3.8 s a frame, of which ambient occlusion is 2.1 s; without it 1.8 s. At film size the
+# shadow maps already ground the players, so films keep shadows, bloom and the full crowd.
+FILM_QUALITY: dict[str, Any] = {"base": "high", "gtao": False}
 GPU_LESS_ARGS = ["--use-gl=angle", "--use-angle=gl", "--enable-unsafe-swiftshader", "--ignore-gpu-blocklist"]
 
 
 class Studio:
     """A render-mode Studio page, signed in, with the match loaded."""
 
-    def __init__(self, base: str, code: str, match: str, lang: str, aspect: str, gpu_less: bool = False):
+    def __init__(
+        self,
+        base: str,
+        code: str,
+        match: str,
+        lang: str,
+        aspect: str,
+        gpu_less: bool = False,
+        quality: str | dict[str, Any] = FILM_QUALITY,
+    ):
         self.base, self.code, self.match, self.lang, self.aspect = base.rstrip("/"), code, match, lang, aspect
-        self.gpu_less = gpu_less
+        self.gpu_less, self.quality = gpu_less, quality
         self._pw = None
         self.page: Page | None = None
 
@@ -41,13 +55,54 @@ class Studio:
         self.page.goto(f"{self.base}/?render=1")
         self.page.wait_for_function("() => window.__render")
         self.info = self.page.evaluate(
-            "(a) => window.__render.init(a)", {"match": self.match, "lang": self.lang, "aspect": self.aspect}
+            "(a) => window.__render.init(a)",
+            {"match": self.match, "lang": self.lang, "aspect": self.aspect, "quality": self.quality},
         )
         return self
 
     def __exit__(self, *exc: object) -> None:
         if self._pw:
             self._pw.stop()
+
+    def step(self, spec: dict[str, Any], index: int, fps: int) -> None:
+        """Advance the page to frame `index` without capturing it."""
+        assert self.page
+        self.page.evaluate("([s, i, f]) => window.__render.frame(s, i, f)", [spec, index, fps])
+
+    def caption(self, lang: str, moment: str, out: Path) -> bool:
+        """The verified caption card alone, transparent around it, as a full-frame PNG."""
+        assert self.page
+        shown = self.page.evaluate("(a) => window.__render.caption(a)", {"lang": lang, "moment": moment})
+        if shown:
+            self.page.screenshot(path=str(out), type="png", omit_background=True)
+        return bool(shown)
+
+    def line(self, lang: str, text: str, out: Path) -> bool:
+        """One of the caller's lines alone, transparent around it, as a full-frame PNG."""
+        assert self.page
+        shown = self.page.evaluate("(a) => window.__render.line(a)", {"lang": lang, "text": text})
+        if shown:
+            self.page.screenshot(path=str(out), type="png", omit_background=True)
+        return bool(shown)
+
+    def card(self, title: str, sub: str, t: float, out: Path) -> Path:
+        """A title or end card still (its clip is made by holding it)."""
+        assert self.page
+        self.page.evaluate("(a) => window.__render.card(a)", {"title": title, "sub": sub, "t": t})
+        self.page.screenshot(path=str(out), type="png")
+        return out
+
+    def probe(self) -> dict[str, Any] | None:
+        """Where the drawn ball sits against the striking bone and the controlling player."""
+        assert self.page
+        return self.page.evaluate("() => window.__render.probe()")
+
+    def still(self, spec: dict[str, Any], index: int, fps: int, out: Path) -> Path:
+        """One frame of the film as a PNG (QA, thumbnails)."""
+        assert self.page
+        self.step(spec, index, fps)
+        self.page.screenshot(path=str(out), type="png")
+        return out
 
     def package_duration(self, goal_t: int) -> float:
         assert self.page
@@ -60,8 +115,16 @@ class Studio:
         out: Path,
         ffmpeg: str = "ffmpeg",
         progress: Callable[[int, int, float], None] | None = None,
+        first: int = 0,
+        warmup: list[dict[str, Any]] | None = None,
+        crf: int = 20,
     ) -> Path:
+        """Encode `specs` as frames `first`, `first + 1`, ... of the film. A slice of a film
+        (one render-job chunk) first steps through `warmup`, the frames just before it,
+        uncaptured, so animation blends and camera moves match a straight-through render."""
         assert self.page
+        for j, spec in enumerate(warmup or []):
+            self.step(spec, first - len(warmup or []) + j, fps)
         enc = subprocess.Popen(  # noqa: S603 - our own arguments
             [
                 ffmpeg,
@@ -79,10 +142,18 @@ class Studio:
                 "-",
                 "-c:v",
                 "libx264",
+                # quality-led but capped for sharing: phones and social apps play it without
+                # re-encoding, and an 80 s film stays near 40 MB
                 "-preset",
-                "medium",
+                "slow",
                 "-crf",
-                "19",
+                str(crf),
+                "-maxrate",
+                "4500k",
+                "-bufsize",
+                "9000k",
+                "-profile:v",
+                "high",
                 "-pix_fmt",
                 "yuv420p",
                 "-movflags",
@@ -94,7 +165,7 @@ class Studio:
         assert enc.stdin
         t0 = time.perf_counter()
         for i, spec in enumerate(specs):
-            self.page.evaluate("([s, i, f]) => window.__render.frame(s, i, f)", [spec, i, fps])
+            self.step(spec, first + i, fps)
             enc.stdin.write(self.page.screenshot(type="jpeg", quality=92))
             if progress and (i % 30 == 0 or i == len(specs) - 1):
                 progress(i + 1, len(specs), time.perf_counter() - t0)
@@ -104,7 +175,12 @@ class Studio:
         return out
 
 
-def mux(video: Path, audio: Path, out: Path, ffmpeg: str = "ffmpeg") -> Path:
+def concat(parts: list[Path], out: Path, ffmpeg: str = "ffmpeg") -> Path:
+    """Join chunk videos losslessly: every chunk is its own H.264 stream with the same settings,
+    starting on a keyframe, so the parts butt together with no re-encode."""
+    listing = out.with_suffix(".parts.txt")
+    lines = [f"file '{p.resolve().as_posix()}'" for p in parts]
+    listing.write_text("".join(f"{line}\n" for line in lines), encoding="utf-8")
     subprocess.run(  # noqa: S603 - our own arguments
         [
             ffmpeg,
@@ -112,19 +188,24 @@ def mux(video: Path, audio: Path, out: Path, ffmpeg: str = "ffmpeg") -> Path:
             "-loglevel",
             "error",
             "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
             "-i",
-            str(video),
-            "-i",
-            str(audio),
-            "-c:v",
+            str(listing),
+            "-c",
             "copy",
-            "-c:a",
-            "copy",
-            "-shortest",
             "-movflags",
             "+faststart",
             str(out),
         ],
         check=True,
     )
+    listing.unlink(missing_ok=True)
+    return out
+
+
+def mux(video: Path, audio: Path, out: Path, ffmpeg: str = "ffmpeg") -> Path:
+    run(mux_command(video, audio, out, ffmpeg))
     return out

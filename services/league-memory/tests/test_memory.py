@@ -72,6 +72,18 @@ def test_goal_context_droughts_are_recomputed_correctly(memory, universe):
     assert checked > 0
 
 
+def test_a_second_goal_today_is_numbered_as_such_and_old_news_is_not_repeated(memory, universe):
+    pid = next(ln.player_id for ln in universe.history.lines if ln.goals)
+    first = memory.goal_context(pid, True)
+    second = memory.goal_context(pid, True, goals_today=1)
+    assert second["season_goal_number"] == first["season_goal_number"] + 1
+    assert second["career_goal_number"] == first["career_goal_number"] + 1
+    assert (first["match_goal_number"], second["match_goal_number"]) == (1, 2)
+    once = {"first_league_goal", "goal_drought_ended", "first_home_goal_in", "first_goal_of_season"}
+    assert not once & {f["fact"] for f in second["facts"]}  # a drought ends once, not twice in a day
+    assert first["query_id"] != second["query_id"]  # a different question, a different answer
+
+
 def test_head_to_head_is_consistent(memory, universe):
     h = memory.head_to_head("kes", "irv", last=100)
     meetings = [m for m in universe.history.matches if {m.home, m.away} == {"kes", "irv"}]

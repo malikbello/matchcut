@@ -5,6 +5,7 @@ description = "Matchcut API: access sessions, cue streams over Server-Sent Event
 requires-python = ">=3.12"
 dependencies = [
     "matchcut-contracts",
+    "matchcut-editing",
     "fastapi>=0.120",
     "uvicorn>=0.40",
     "sse-starlette>=3.0",
@@ -13,6 +14,7 @@ dependencies = [
     "azure-identity>=1.26",
     "azure-storage-blob>=12.24",
     "azure-storage-queue>=12.12",
+    "segno>=1.6",
 ]
 
 [project.scripts]

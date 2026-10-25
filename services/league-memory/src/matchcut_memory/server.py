@@ -35,9 +35,10 @@ def player_profile(player_id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def goal_context(player_id: str, is_home: bool) -> dict[str, Any]:
-    """Facts that become true if this player scores now: droughts ended, milestones, first goals."""
-    return memory().goal_context(player_id, is_home)
+def goal_context(player_id: str, is_home: bool, goals_today: int = 0) -> dict[str, Any]:
+    """Facts that become true if this player scores now: which goal of his season and career
+    it is, droughts ended, milestones, first goals. goals_today: his goals earlier in this match."""
+    return memory().goal_context(player_id, is_home, goals_today)
 
 
 @mcp.tool()

@@ -102,3 +102,12 @@ def test_azure_speech_is_keyless_and_skips_caption_only_languages(tmp_path):
     manifest.write_text('{"CU-00002-en-NG": "azure:old-voice"}', encoding="utf-8")
     assert voice_cues([_cue("en-NG")], speech, tmp_path) == 1
     assert seen["url"].endswith("/tts/cognitiveservices/v1")
+    # a line rewritten under the same cue ID and voice is voiced again: its old audio would say the
+    # old words under the new caption
+    seen.clear()
+    rewritten = _cue("en-NG").model_copy(update={"text": "His 9th of the season, his second tonight."})
+    assert voice_cues([rewritten], speech, tmp_path) == 1
+    assert seen["url"].endswith("/tts/cognitiveservices/v1")
+    seen.clear()
+    assert voice_cues([rewritten], speech, tmp_path) == 1
+    assert not seen  # and only once

@@ -21,6 +21,38 @@ const FADE_OUT = 0.3;
 const TURN_RATE = 7; // rad/s, body yaw
 const SPRINT_FACING = 4.3; // above this speed players face where they run
 
+// Celebrations a scorer can make, beyond the library's one victory clip, posed in code by aiming
+// the skeleton's limbs as games do for aim poses: "leap" jumps with a half turn and lands arms
+// swept down and out, chest out, feet planted wide; "aeroplane" runs to the corner arms out wide.
+// A scorer's goals of a match take the styles in turn, from a start his name sets.
+export const CELEBRATIONS = ["leap", "victory", "aeroplane"];
+export function celebrationStyle(name, goalsBefore = 0) {
+  let h = 0;
+  for (const ch of name || "") h += ch.charCodeAt(0);
+  return CELEBRATIONS[(h + goalsBefore) % CELEBRATIONS.length];
+}
+const LEAP = { start: 0.15, up: 0.5, height: 0.55, hold: 1.4 }; // s after arriving, s in the air, m, s held
+// when a leaping scorer lets the landing go and celebrates on (the victory clip takes over)
+export const LEAP_END = LEAP.start + LEAP.up + LEAP.hold;
+const _a = new THREE.Vector3();
+const _b = new THREE.Vector3();
+const _turn = new THREE.Quaternion();
+const _world = new THREE.Quaternion();
+const _parent = new THREE.Quaternion();
+const _dir = new THREE.Vector3();
+
+// turn a bone so that it points (towards its child joint) along a world direction, by weight w
+function aim(bone, child, dir, w) {
+  if (!bone || !child || w <= 0) return;
+  bone.getWorldPosition(_a);
+  child.getWorldPosition(_b);
+  _turn.setFromUnitVectors(_b.sub(_a).normalize(), dir);
+  bone.getWorldQuaternion(_world).premultiply(_turn);
+  bone.parent.getWorldQuaternion(_parent).invert();
+  bone.quaternion.slerp(_parent.multiply(_world), w);
+  bone.updateMatrixWorld(true);
+}
+
 // Kit painted over the textured athlete. Regions are measured on the bind pose (the
 // un-skinned position), so they follow the body as it animates: boots, socks, shorts,
 // shirt with short sleeves and collar; skin keeps the character's texture, tinted to the
@@ -78,7 +110,7 @@ function kitMaterial(source, colours, frame, decal) {
          if (kitMask > 0.5) {
            // name and number on the back of the shirt
            if (back > 0.2 && h > 0.60 && h < 0.79 && side < 0.22) {
-             vec2 uv = vec2(0.5 - uFront * (vBind.x - uCenterX) / (0.44 * uHalfW), (h - 0.60) / 0.19); // read from behind, not mirrored
+             vec2 uv = vec2(0.5 - uFront * (vBind.x - uCenterX) / (0.44 * uHalfW), 1.0 - (h - 0.60) / 0.19); // read from behind; canvas rows run top-down
              vec4 d = texture2D(uDecal, uv);
              kit = mix(kit, d.rgb, d.a);
            }
@@ -101,6 +133,88 @@ function kitMaterial(source, colours, frame, decal) {
   return mat;
 }
 
+// Rocketbox footballers (realistic athletes, MIT): the kit is painted by a baked mask that
+// names each texel's garment (shirt, shorts, socks, boots, trim) and marks the back's name
+// panel; a fitted UV-to-panel map prints the name and number sharp at any distance. Folds come
+// from the normal map; skin keeps the photographic texture, tinted to the player's tone.
+const SKIN_TINT = `
+  vec3 skinTone(vec3 tex, vec3 tone) {
+    float lum = dot(tex, vec3(0.299, 0.587, 0.114));
+    return mix(tex, tone * (0.42 + 1.15 * lum), 0.5);
+  }`;
+function rocketboxKit(source, colours, kit, decal) {
+  const mat = source.clone();
+  const [a, b, c, d, e, f] = kit.decal;
+  const u = {
+    uShirt: { value: new THREE.Color(colours.shirt) },
+    uTrim: { value: new THREE.Color(colours.trim) },
+    uShorts: { value: new THREE.Color(colours.shorts) },
+    uSocks: { value: new THREE.Color(colours.socks) },
+    uSkin: { value: new THREE.Color(colours.skin) },
+    uBoots: { value: new THREE.Color(colours.boots) },
+    uMask: { value: kit.mask },
+    uDecal: { value: decal },
+    uDecalU: { value: new THREE.Vector3(a, b, c) },
+    uDecalV: { value: new THREE.Vector3(d, e, f) },
+  };
+  mat.userData.kit = u;
+  mat.roughness = 0.78;
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, u);
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        "#include <common>",
+        `#include <common>
+         uniform vec3 uShirt, uTrim, uShorts, uSocks, uSkin, uBoots, uDecalU, uDecalV;
+         uniform sampler2D uMask, uDecal;
+         ${SKIN_TINT}`,
+      )
+      .replace(
+        "#include <map_fragment>",
+        `#include <map_fragment>
+         vec4 km = texture2D(uMask, vMapUv);
+         int region = int(km.r * 255.0 / 40.0 + 0.5);
+         vec3 tex = diffuseColor.rgb;
+         if (region == 1 || region == 2 || region == 3 || region == 5) {
+           vec3 kit = region == 1 ? uShirt : region == 2 ? uShorts : region == 3 ? uSocks : uTrim;
+           if (km.a > 0.5) {
+             vec3 q = vec3(vMapUv, 1.0);
+             vec2 p = vec2(dot(uDecalU, q), dot(uDecalV, q));
+             if (p.x >= 0.0 && p.x <= 1.0 && p.y >= 0.0 && p.y <= 1.0) {
+               vec4 dc = texture2D(uDecal, vec2(p.x, 1.0 - p.y)); // canvas rows run top-down
+               kit = mix(kit, dc.rgb, dc.a);
+             }
+           }
+           diffuseColor.rgb = kit;
+         } else if (region == 4) {
+           float lum = dot(tex, vec3(0.299, 0.587, 0.114));
+           diffuseColor.rgb = mix(tex, uBoots * (0.3 + 0.9 * lum), 0.6);
+         } else {
+           diffuseColor.rgb = skinTone(tex, uSkin);
+         }`,
+      );
+  };
+  mat.customProgramCacheKey = () => "matchcut-rocketbox-kit";
+  return mat;
+}
+function rocketboxSkin(source, tone) {
+  const mat = source.clone();
+  const u = { uSkin: { value: new THREE.Color(tone) } };
+  mat.roughness = 0.55;
+  mat.onBeforeCompile = (shader) => {
+    Object.assign(shader.uniforms, u);
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", `#include <common>\nuniform vec3 uSkin;\n${SKIN_TINT}`)
+      .replace("#include <map_fragment>", "#include <map_fragment>\ndiffuseColor.rgb = skinTone(diffuseColor.rgb, uSkin);");
+  };
+  mat.customProgramCacheKey = () => "matchcut-rocketbox-skin";
+  return mat;
+}
+const toneLuma = (hex) => {
+  const c = new THREE.Color(hex);
+  return 0.299 * c.r + 0.587 * c.g + 0.114 * c.b;
+};
+
 function nameplate(name, num, colour) {
   const cv = document.createElement("canvas");
   cv.width = 256;
@@ -109,10 +223,11 @@ function nameplate(name, num, colour) {
   c.fillStyle = colour;
   c.textAlign = "center";
   c.textBaseline = "alphabetic";
+  // as real shirts carry it: the name across the shoulders, the number below
   c.font = "800 34px 'Big Shoulders Display', 'Arial Narrow', sans-serif";
-  c.fillText(String(name).toUpperCase(), 128, 236);
+  c.fillText(String(name).toUpperCase(), 128, 44);
   c.font = "900 170px 'Big Shoulders Display', 'Arial Narrow', sans-serif";
-  c.fillText(String(num), 128, 196);
+  c.fillText(String(num), 128, 214);
   const t = new THREE.CanvasTexture(cv);
   t.colorSpace = THREE.SRGBColorSpace;
   t.flipY = false;
@@ -165,10 +280,36 @@ export class Player {
     this.decal = nameplate(name, num, this.numberColour);
     const style = HAIRSTYLES[(seed * 3) % HAIRSTYLES.length];
     const hairTint = new THREE.Color(HAIR_COLOURS[(seed * 7) % HAIR_COLOURS.length]);
+    // Rocketbox: two real footballers on one skeleton; darker tones take the body whose face and
+    // hair were made for them, so tinting stays gentle and natural
+    const variant = lib.rig === "rocketbox" ? (toneLuma(colours.skin) < 0.42 ? "m300" : "m301") : null;
+    const owner = (o) => {
+      for (let n = o; n; n = n.parent) if (/^FOOTBALLER_/.test(n.name)) return n.name.slice(11, 15);
+      return null;
+    };
     body.traverse((o) => {
       if (!o.isMesh) return;
       o.castShadow = true;
       o.frustumCulled = false; // skinned bounds lag the pose; 22 players are cheap to draw
+      if (variant) {
+        const code = owner(o);
+        if (code && code !== variant) {
+          o.visible = false;
+          return;
+        }
+        const mname = o.material?.name ?? "";
+        if (/_body$/.test(mname) && lib.kits?.[variant]) {
+          o.material = rocketboxKit(o.material, colours, lib.kits[variant], this.decal);
+        } else if (/_head$/.test(mname)) {
+          o.material = rocketboxSkin(o.material, colours.skin);
+        } else if (/opacity/.test(mname)) {
+          o.material = o.material.clone(); // hair cards: cut out, never sorted glass
+          o.material.alphaTest = 0.45;
+          o.material.transparent = false;
+          o.material.side = THREE.DoubleSide;
+        }
+        return;
+      }
       if (/^HAIR_/.test(o.name)) {
         const keep = style.some((h) => o.name.includes(h)) || /Eyebrows_Regular/.test(o.name);
         o.visible = keep;
@@ -208,20 +349,31 @@ export class Player {
     let found = 0;
     body.traverse((o) => {
       if (!o.isBone) return;
-      if (/^foot_l$|LeftFoot$/i.test(o.name)) {
+      if (/^foot_l$|LeftFoot$|_L_Foot$/i.test(o.name)) {
         o.getWorldPosition(heel);
         found++;
       }
-      if (/^ball_l$|LeftToeBase$/i.test(o.name)) {
+      if (/^ball_l$|LeftToeBase$|_L_Toe0$/i.test(o.name)) {
         o.getWorldPosition(toe);
         found++;
       }
     });
     const fwd = toe.sub(heel);
     this.yawOffset = found === 2 && Math.hypot(fwd.x, fwd.z) > 1e-4 ? Math.atan2(fwd.x, fwd.z) : 0;
+    // the bones that strike the ball, by the library's generic names
+    const STRIKER = {
+      foot_r: /^foot_r$|RightFoot$|_R_Foot$/i, foot_l: /^foot_l$|LeftFoot$|_L_Foot$/i,
+      head: /^head$|(^|_)Head$/i, hand_r: /^hand_r$|RightHand$|_R_Hand$/i, hand_l: /^hand_l$|LeftHand$|_L_Hand$/i,
+    };
+    this.strikers = {};
+    body.traverse((o) => {
+      if (!o.isBone) return;
+      for (const [k, re] of Object.entries(STRIKER)) if (!this.strikers[k] && re.test(o.name)) this.strikers[k] = o;
+    });
+    this.strike = null; // { bone, w }: the ball belongs on this bone around an action's contact frame
     this.hands = [];
     body.traverse((o) => {
-      if (o.isBone && /^hand_[lr]$|(Left|Right)Hand$/i.test(o.name)) this.hands.push(o);
+      if (o.isBone && /^hand_[lr]$|(Left|Right)Hand$|_[LR]_Hand$/i.test(o.name)) this.hands.push(o);
     });
     this.body = body;
     this.mixer = new THREE.AnimationMixer(body);
@@ -244,8 +396,25 @@ export class Player {
       this.loco = [{ clip: "Jog_Fwd_Loop", dir: 0, speed: 3.8, action: make("Jog_Fwd_Loop") }];
       this.gears = [{ clip: "Sprint_Loop", speed: 7, action: make("Sprint_Loop") }];
     }
+    // limbs a celebration poses: [joint, the joint it points to] for each segment
+    const bone = (re) => {
+      let found = null;
+      body.traverse((o) => {
+        if (!found && o.isBone && re.test(o.name)) found = o;
+      });
+      return found;
+    };
+    const chain = (side, names) => names.map((n) => bone(new RegExp(`${side}[ _]${n}$`, "i")));
+    this.limbs = {
+      L: { arm: chain("L", ["UpperArm", "Forearm", "Hand"]), leg: chain("L", ["Thigh", "Calf", "Foot"]) },
+      R: { arm: chain("R", ["UpperArm", "Forearm", "Hand"]), leg: chain("R", ["Thigh", "Calf", "Foot"]) },
+    };
+    // the gait of a player running with the ball at his feet (body over the ball, short steps)
+    this.dribbleGait = this.cc0 ? null : make("dribble");
+    this.dribbleStride = (lib.meta?.dribble?.root_speed ?? 2.4) * (this.dribbleGait?.getClip().duration ?? 1.7);
     this.actions = new Map(); // clip name -> AnimationAction (created on first use)
     this.phase = (seed * 0.137) % 1;
+    this.strides = 0;
     this.heading = 0;
     this.speed = 0;
     this.current = null; // { action, start, contact, duration, face }
@@ -260,6 +429,36 @@ export class Player {
       return out.copy(a).add(b).multiplyScalar(0.5);
     }
     return out.set(this.root.position.x + Math.sin(this.heading) * 0.42, 0.11, this.root.position.z + Math.cos(this.heading) * 0.42);
+  }
+
+  // where the striking bone meets the ball at an action's contact frame
+  strikePoint(out) {
+    const bone = this.strike?.bone;
+    if (!bone) return this.ballSpot(out);
+    bone.getWorldPosition(out);
+    if (bone === this.strikers.head) return out;
+    // the instep, not the ankle: a little ahead of the foot bone, at the ball's height
+    out.x += Math.sin(this.heading) * 0.12;
+    out.z += Math.cos(this.heading) * 0.12;
+    out.y = Math.max(0.11, out.y);
+    return out;
+  }
+
+  // a dribble as players do it: a touch on the stride pushes the ball out, it rolls ahead and
+  // slows, the player catches it on the next stride. The offset follows the locomotion phase
+  // (one touch per stride cycle, every other cycle at a sprint) and grows with speed.
+  dribbleSpot(out, carried) {
+    const s = this.speed;
+    const u = s > 6 ? ((this.strides % 2) + this.phase) / 2 : this.phase;
+    const reach = THREE.MathUtils.clamp(0.35 + s * 0.24, 0.6, 2.3);
+    const ahead = 0.32 + (reach - 0.32) * Math.pow(Math.sin(Math.PI * u), 0.8) * carried;
+    const side = 0.07 * Math.cos(Math.PI * u); // the touching foot's side, drifting to the middle
+    out.set(
+      this.root.position.x + Math.sin(this.heading) * ahead + Math.cos(this.heading) * side,
+      0.11,
+      this.root.position.z + Math.cos(this.heading) * ahead - Math.sin(this.heading) * side,
+    );
+    return out;
   }
 
   // a substitution puts a new player in this slot: new name and number on the shirt
@@ -290,7 +489,7 @@ export class Player {
   }
 
   // event: the feed row, or null; tMs: match time
-  update({ x, z, vx, vz, ballX, ballZ, tMs, dt, event, snap }) {
+  update({ x, z, vx, vz, ballX, ballZ, tMs, dt, event, snap, carrying = false, celebration = null }) {
     this.root.position.set(x, 0, z);
     const v = Math.hypot(vx, vz);
     this.speed = snap ? v : this.speed + (v - this.speed) * Math.min(1, dt * 8);
@@ -310,31 +509,50 @@ export class Player {
     // the on-ball action, if one covers this moment
     let actionWeight = 0;
     let act = null;
+    let strike = null;
+    let now = null; // the action playing and its clip time, for motion QA
     if (event) {
       const meta = this.lib.meta;
       const choice = actionFor(event, { keeper: this.keeper, speed: s, meta });
       const a = choice?.clip ? this._action(choice.clip) : null;
       if (a) {
         const m = meta[choice.clip] ?? { contact: 0.3, duration: a.getClip().duration };
-        const local = (tMs - event[0]) / 1000 + m.contact; // seconds into the clip
+        const local = (tMs - event[0]) / 1000 + (choice.stretch ?? m.contact); // seconds into the clip
         const dur = a.getClip().duration;
-        if (local >= 0 && local <= dur) {
+        // a beaten keeper moves only once he can react to the strike (event[4]), from mid-windup
+        const since = choice.beaten ? (tMs - event[4]) / 1000 : local;
+        if (since >= 0 && local >= 0 && local <= dur) {
           act = a;
           a.time = local;
-          actionWeight = Math.min(1, local / FADE_IN, (dur - local) / FADE_OUT);
+          // motion QA: the clip, its time and contact, and whether it aims at a target (a shot, a pass)
+          now = { clip: choice.clip, at: Math.round(local * 100) / 100, contact: choice.stretch ?? m.contact,
+            aims: Boolean(choice.faceTarget && event[7] >= 0) };
+          actionWeight = Math.min(1, since / FADE_IN, (dur - local) / FADE_OUT);
+          // the ball is drawn onto the striking bone in the fifth of a second before contact,
+          // and let go just after it, when the tracked ball takes over in flight
+          const bone = this.strikers[m.contact_bone];
+          const before = THREE.MathUtils.smoothstep(local, m.contact - 0.22, m.contact);
+          const after = 1 - THREE.MathUtils.smoothstep(local, m.contact, m.contact + 0.05);
+          strike = bone && !this.catching && !choice.beaten && !choice.offBall ? { bone, w: Math.min(before, after) } : null;
           if (choice.faceTarget && event[7] >= 0) {
             const tx = event[7] / 10 - 52.5;
             const tz = event[8] / 10 - 34;
             target = Math.atan2(tx - x, tz - z);
+          } else if (choice.faceBall) {
+            target = toBall; // a tackle goes in on the ball, even from a sprint
           }
         }
       }
     }
+    this.strike = strike && strike.w > 0 ? strike : null;
+    this.acting = Boolean(act);
+    this.actionNow = now;
     for (const a of this.actions.values()) if (a !== act) a.setEffectiveWeight(0);
     if (act) act.setEffectiveWeight(actionWeight);
 
     const turn = wrap(target - this.heading);
     this.heading = snap ? target : this.heading + Math.sign(turn) * Math.min(Math.abs(turn), TURN_RATE * dt);
+    if (now?.aims) now.off = Math.round(Math.abs(THREE.MathUtils.radToDeg(wrap(target - this.heading))));
     this.root.rotation.y = this.heading - this.yawOffset;
     this.catching = Boolean(act && this.keeper && event && event[1] === "save" && tMs >= event[0]);
 
@@ -388,17 +606,79 @@ export class Player {
       total += w;
     }
     stride = total > 0 ? stride / total : 2;
-    if (!snap) this.phase = (this.phase + (dt * Math.max(s, 0.6)) / Math.max(0.5, stride)) % 1;
+    // the ball at his feet, moving forwards at up to a fast jog: the dribbling gait takes over (a
+    // sprint stays a run with long touches); it shares the stride phase, so touches stay in step
+    const forwards = 1 - THREE.MathUtils.smoothstep(Math.abs(rel), 40, 70);
+    const dribble =
+      this.dribbleGait && carrying && !this.keeper
+        ? THREE.MathUtils.smoothstep(s, 0.9, 1.6) * (1 - THREE.MathUtils.smoothstep(s, 4.8, 5.8)) * forwards
+        : 0;
+    stride = stride * (1 - dribble) + this.dribbleStride * dribble;
+    if (!snap) {
+      const next = (this.phase + (dt * Math.max(s, 0.6)) / Math.max(0.5, stride)) % 1;
+      if (next < this.phase) this.strides++; // a completed stride cycle (sprint touches every other one)
+      this.phase = next;
+    }
 
     const locoWeight = (1 - actionWeight) * moving;
     for (const l of [...this.loco, ...this.gears]) {
       l.action.time = this.phase * l.action.getClip().duration;
-      l.action.setEffectiveWeight(locoWeight * (weights.get(l.action) ?? 0));
+      l.action.setEffectiveWeight(locoWeight * (1 - dribble) * (weights.get(l.action) ?? 0));
+    }
+    if (this.dribbleGait) {
+      this.dribbleGait.time = this.phase * this.dribbleGait.getClip().duration;
+      this.dribbleGait.setEffectiveWeight(locoWeight * dribble);
     }
     if (this.idle) {
       this.idle.time = (tMs / 1000) % this.idle.getClip().duration;
       this.idle.setEffectiveWeight((1 - actionWeight) * (1 - moving));
     }
     this.mixer.update(0);
+    if (celebration) this.celebrate(celebration);
+  }
+
+  // a scorer's own celebration, posed over the clips: { style, cel } with cel the seconds since
+  // he reached the corner (null while still running there)
+  celebrate({ style, cel }) {
+    const { L, R } = this.limbs;
+    if (!L.arm[0] || !R.arm[0]) return;
+    let spin = 0;
+    let lift = 0;
+    let arms = null; // [side, up, back] weights of each arm's direction
+    let legs = 0; // how wide the feet are planted
+    let weight = 1; // how much the pose overrides the clip underneath
+    if (style === "aeroplane" && cel === null && this.speed > 1.5) {
+      arms = [0.97, -0.08, 0.2];
+    } else if (style === "leap" && cel !== null) {
+      const air = THREE.MathUtils.clamp((cel - LEAP.start) / LEAP.up, 0, 1);
+      lift = cel > LEAP.start && air < 1 ? LEAP.height * Math.sin(Math.PI * air) : 0;
+      spin = Math.PI * THREE.MathUtils.smootherstep(air, 0, 1); // a half turn in the air
+      const landed = THREE.MathUtils.smoothstep(cel, LEAP.start + LEAP.up, LEAP.start + LEAP.up + 0.12);
+      // in the air the arms rise wide; landed they sweep down and back, chest out
+      arms = [0.62, THREE.MathUtils.lerp(0.55, -0.72, landed), THREE.MathUtils.lerp(0, 0.32, landed)];
+      // after the hold the pose lets go and the victory clip takes the body back, smoothly
+      weight = 1 - THREE.MathUtils.smoothstep(cel, LEAP_END, LEAP_END + 0.35);
+      legs = landed * weight;
+      if (weight <= 0) return;
+    }
+    if (!arms) return;
+    this.root.position.y += lift - legs * 0.035; // wide feet sit lower, the hips drop to the turf
+    this.root.rotation.y += spin;
+    this.root.updateMatrixWorld(true);
+    const facing = this.heading + spin;
+    const fwd = _b.set(Math.sin(facing), 0, Math.cos(facing)).clone();
+    const right = new THREE.Vector3(-Math.cos(facing), 0, Math.sin(facing));
+    for (const [side, limbs] of [[-1, L], [1, R]]) {
+      const [s, up, back] = arms;
+      _dir.copy(right).multiplyScalar(side * s).addScaledVector(fwd, -back).setY(up).normalize();
+      aim(limbs.arm[0], limbs.arm[1], _dir, weight);
+      aim(limbs.arm[1], limbs.arm[2], _dir, weight);
+      if (legs > 0) {
+        _dir.copy(right).multiplyScalar(side * 0.3).setY(-0.95).normalize();
+        aim(limbs.leg[0], limbs.leg[1], _dir, legs);
+        _dir.copy(right).multiplyScalar(side * 0.12).setY(-0.99).normalize();
+        aim(limbs.leg[1], limbs.leg[2], _dir, legs);
+      }
+    }
   }
 }

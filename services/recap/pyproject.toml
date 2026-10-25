@@ -5,6 +5,7 @@ description = "Every fan's cut: the Editor that plans a personal highlight film,
 requires-python = ">=3.12"
 dependencies = [
     "matchcut-contracts",
+    "matchcut-editing",
     "playwright>=1.48",
     "httpx>=0.28",
     "azure-identity>=1.26",
@@ -16,6 +17,7 @@ dependencies = [
 [project.scripts]
 matchcut-recap = "matchcut_recap.cli:main"
 matchcut-recap-job = "matchcut_recap.job:main"
+matchcut-journey = "matchcut_recap.journey:main"
 
 [build-system]
 requires = ["hatchling>=1.25"]

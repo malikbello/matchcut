@@ -22,6 +22,9 @@ NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 EM_DASH = chr(0x2014)
 # betting language, certainty claims and real-world marks never appear on screen
 BANNED = re.compile(r"\b(bet|bets|betting|odds|wager|guaranteed|premier league|epl)\b", re.IGNORECASE)
+# English ordinals (8th, 74th) belong only in lines written in English or English-based Pidgin
+ENGLISH_ORDINAL = re.compile(r"\b\d+(?:st|nd|rd|th)\b", re.IGNORECASE)
+ENGLISH_ORDINALS_OK = {"", "en", "en-NG", "pcm"}
 
 
 @dataclass
@@ -140,9 +143,14 @@ def verify_line(
     return Verdict(checks, problems)
 
 
-def verify_translation(source: str, translated: str, known_names: Iterable[str]) -> Verdict:
-    """A translation must carry exactly the source's numbers and proper names."""
+def verify_translation(
+    source: str, translated: str, known_names: Iterable[str], language: str = ""
+) -> Verdict:
+    """A translation must carry exactly the source's numbers and proper names, and be written in
+    its language: an English ordinal (8th, 74th) left in a French or Yoruba line is the mark of a
+    phrase copied rather than translated."""
     names = list(known_names)
+    english_left = language not in ENGLISH_ORDINALS_OK and bool(ENGLISH_ORDINAL.search(translated))
     same_numbers = Counter(numbers_in(source)) == Counter(numbers_in(translated))
     missing = sorted(_names_in(source, names) - _names_in(translated, names))
     banned = BANNED.findall(translated)
@@ -155,11 +163,14 @@ def verify_translation(source: str, translated: str, known_names: Iterable[str])
         problems.append("banned terms")
     if EM_DASH in translated:
         problems.append("house style: em dash")
+    if english_left:
+        problems.append(f"English left in the {language} line: {ENGLISH_ORDINAL.findall(translated)}")
     checks = {
         "numbers_preserved": same_numbers,
         "names_preserved": not missing,
         "length_ok": len(translated) <= MAX_CHARS + 60,
         "clean_language": not banned,
         "house_style": EM_DASH not in translated,
+        "translated": not english_left,
     }
     return Verdict(checks, problems)

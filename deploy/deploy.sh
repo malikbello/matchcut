@@ -12,11 +12,16 @@
 #    never go in git) to private Blob Storage, where the release workflow fetches it.
 #
 # Optional: MATCHCUT_RG (default rg-matchcut-dev), MATCHCUT_IMAGE_TAG (default: latest),
-# MATCHCUT_SHOWCASE=skip to leave the bundle as it is.
+# MATCHCUT_SHOWCASE=skip to leave the bundle as it is, MATCHCUT_DEPLOYERS (default: the signed-in
+# user, who gets data access to the cuts storage: publishing the bundle, queueing the warm-up).
 set -euo pipefail
 
 rg="${MATCHCUT_RG:-rg-matchcut-dev}"
 export MATCHCUT_IMAGE_TAG="${MATCHCUT_IMAGE_TAG:-latest}"
+if [ -z "${MATCHCUT_DEPLOYERS:-}" ]; then
+  MATCHCUT_DEPLOYERS="[{\"id\": \"$(az ad signed-in-user show --query id -o tsv)\", \"type\": \"User\"}]"
+  export MATCHCUT_DEPLOYERS
+fi
 : "${MATCHCUT_ACCESS_CODE_SHA256:?set the SHA-256 of the Studio access code}"
 : "${MATCHCUT_SESSION_SECRET:?set the session signing key}"
 bundle_paths=(out/feeds out/insights out/calls out/media apps/studio/assets/private)

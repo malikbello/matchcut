@@ -2,9 +2,9 @@
 // on its own when the frame rate stays low, then falls back to the 2D data pitch if
 // WebGL is missing. Each tier only changes cost, never what the viewer is told.
 export const TIERS = {
-  high: { pixelRatio: 2, shadows: 2048, crowd: 19000, bloom: true, antialias: true },
-  medium: { pixelRatio: 1.5, shadows: 1024, crowd: 9000, bloom: true, antialias: true },
-  low: { pixelRatio: 1, shadows: 0, crowd: 3500, bloom: false, antialias: false },
+  high: { pixelRatio: 2, shadows: 2048, crowd: 19000, bloom: true, gtao: true, antialias: true },
+  medium: { pixelRatio: 1.5, shadows: 1024, crowd: 9000, bloom: true, gtao: false, antialias: true },
+  low: { pixelRatio: 1, shadows: 0, crowd: 3500, bloom: false, gtao: false, antialias: false },
 };
 export const ORDER = ["high", "medium", "low"];
 

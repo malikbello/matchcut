@@ -112,6 +112,44 @@ def _leaves(obj: Any) -> Iterable[Any]:
         yield obj
 
 
+# League Memory's answer for a goal, said the way a line can quote it (a number as it is: the
+# Writer never computes, so "his 8th of the season" needs the 8 itself in a fact)
+GOAL_NUMBERS = {
+    "season_goal_number": "which league goal of his season this is (say it as 8th, 9th)",
+    "career_goal_number": "his league goals in all, counting this one",
+}
+GOAL_FIRSTS = {
+    "first_league_goal": ("his first league goal, after this many appearances", "apps_before"),
+    "goal_drought_ended": ("league appearances without a goal, before this one", "apps_without_goal"),
+    "first_home_goal_in": ("home league appearances without a goal, before this one", "apps"),
+    "first_away_goal_in": ("away league appearances without a goal, before this one", "apps"),
+    "career_goal_milestone": ("a career milestone, his league goals in all", "goals"),
+    "first_goal_of_season": ("his first league goal of the season", "season"),
+}
+
+
+def goal_history_facts(answer: Mapping[str, Any]) -> list[Fact]:
+    """League Memory's goal answer as facts, built in code with no model in between: which goal
+    of his season and career this is, his second or third of the match, and the first, the
+    drought ended or the milestone it marks. Grounded by construction: the query is the evidence."""
+    qid = str(answer["query_id"])
+    evidence = [qid, *[e for e in answer.get("evidence", []) if isinstance(e, str)]]
+    rows: list[tuple[str, Any]] = [
+        (label, answer[key]) for key, label in GOAL_NUMBERS.items() if key in answer
+    ]
+    if answer.get("match_goal_number", 1) >= 2:
+        rows.append(("his goals in this match, counting this one", answer["match_goal_number"]))
+    for f in answer.get("facts", []):
+        label, key = GOAL_FIRSTS.get(f.get("fact"), (None, None))
+        if label and key in f:
+            rows.append((label, f[key]))
+    # numbered from 51: the Historian's own claims on the same query are numbered from 1
+    return [
+        Fact(fact_id=f"{qid}.{n}", label=label, value=value, source="league_memory", evidence_ids=evidence)
+        for n, (label, value) in enumerate(rows, start=51)
+    ]
+
+
 def tool_results_by_query(raw_results: Iterable[str]) -> dict[str, dict[str, Any]]:
     """Index the League Memory answers a run actually received, by their query ID."""
     out: dict[str, dict[str, Any]] = {}

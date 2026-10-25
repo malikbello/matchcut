@@ -20,15 +20,22 @@ param accessCodeSha256 string
 @description('Key that signs Studio session cookies')
 @secure()
 param sessionSecret string
-@description('GitHub repository whose production environment may release (OIDC, no secrets)')
-param githubRepo string = 'malikbello/matchcut'
+@description('GitHub repository whose production environment may release (OIDC, no secrets), as GitHub names it in the token subject: owner@id/repo@id, so a re-created repository with the same name is not trusted')
+param githubRepo string = 'malikbello@139644523/matchcut@1423646206'
 @description('People and CI identities that publish the showcase bundle (blob data access)')
 param deployerPrincipalIds array = []
 @description('Deploy the apps (false on the first run, before images exist)')
 param deployApps bool = true
+@description('Studio replicas kept warm (1 while the app is being judged, so no visitor waits for a cold start; 0 scales to zero when idle)')
+@minValue(0)
+@maxValue(2)
+param studioMinReplicas int = 0
 
 var suffix = uniqueString(resourceGroup().id)
 var tags = { project: 'matchcut', purpose: 'inside-the-game-hackathon' }
+// one render replica: the job is sized here and told its size (each film's cost is priced from it)
+var recapCpu = 4
+var recapMemoryGi = 8
 
 // ---------------------------------------------------------------- observability
 resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
@@ -164,6 +171,13 @@ resource deployerBlobRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' 
   properties: { principalId: principal.id, principalType: principal.type, roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.blobDataContributor) }
 }]
 
+// deployers queue the render job's warm-up (matchcut-recap prewarm: every clip before fans ask)
+resource deployerQueueRoles 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for principal in deployerPrincipalIds: {
+  scope: storage
+  name: guid(storage.id, principal.id, roles.queueDataContributor)
+  properties: { principalId: principal.id, principalType: principal.type, roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.queueDataContributor) }
+}]
+
 // the release identity: push images, read the showcase bundle, roll out new revisions
 resource releasePush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   scope: registry
@@ -238,10 +252,12 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = if (deployApps) {
         {
           name: 'studio'
           image: '${registry.properties.loginServer}/matchcut-api:${apiImageTag}'
-          resources: { cpu: json('0.5'), memory: '1Gi' }
+          resources: { cpu: json('1'), memory: '2Gi' } // assembles fan cuts: a join and a sound mix
           env: concat(commonEnv, [
             { name: 'MATCHCUT_ACCESS_CODE_SHA256', secretRef: 'access-code-sha256' }
             { name: 'MATCHCUT_SESSION_SECRET', secretRef: 'session-secret' }
+            { name: 'MATCHCUT_CUT_CHUNKS', value: '10' }
+            { name: 'MATCHCUT_PROXY_HOPS', value: '1' } // the ingress: rate limits key on the caller it reports
           ])
           probes: [
             { type: 'Liveness', httpGet: { path: '/healthz', port: 8080 }, periodSeconds: 30 }
@@ -249,7 +265,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = if (deployApps) {
           ]
         }
       ]
-      scale: { minReplicas: 0, maxReplicas: 2, rules: [ { name: 'http', http: { metadata: { concurrentRequests: '40' } } } ] }
+      scale: { minReplicas: studioMinReplicas, maxReplicas: 2, rules: [ { name: 'http', http: { metadata: { concurrentRequests: '40' } } } ] }
     }
   }
   dependsOn: [ pull ]
@@ -273,7 +289,10 @@ resource recap 'Microsoft.App/jobs@2025-01-01' = if (deployApps) {
         replicaCompletionCount: 1
         scale: {
           minExecutions: 0
-          maxExecutions: 3
+          // 20 replicas x 4 vCPU (80 of the environment's 100 cores). Measured 25 Oct: with 24, all
+          // 21 Recap Factory films started together, Azure Speech throttled their QA checks and the
+          // run took 236 s; with 20 it took 158 s at half the compute per film
+          maxExecutions: 20
           pollingInterval: 15
           rules: [
             {
@@ -291,8 +310,12 @@ resource recap 'Microsoft.App/jobs@2025-01-01' = if (deployApps) {
         {
           name: 'recap'
           image: '${registry.properties.loginServer}/matchcut-recap:${recapImageTag}'
-          resources: { cpu: json('4'), memory: '8Gi' }
-          env: concat(commonEnv, [ { name: 'MATCHCUT_FPS', value: '25' } ])
+          resources: { cpu: json(string(recapCpu)), memory: '${recapMemoryGi}Gi' }
+          env: concat(commonEnv, [
+            { name: 'MATCHCUT_FPS', value: '25' }
+            { name: 'MATCHCUT_REPLICA_VCPU', value: string(recapCpu) }
+            { name: 'MATCHCUT_REPLICA_GIB', value: string(recapMemoryGi) }
+          ])
         }
       ]
     }
