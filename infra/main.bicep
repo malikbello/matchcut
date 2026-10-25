@@ -289,9 +289,10 @@ resource recap 'Microsoft.App/jobs@2025-01-01' = if (deployApps) {
         replicaCompletionCount: 1
         scale: {
           minExecutions: 0
-          // 24 replicas x 4 vCPU = 96 cores, with the Studio's 2 within the environment's 100:
-          // every fan's film of a Recap Factory run (21 for the demo match) is made at once
-          maxExecutions: 24
+          // 20 replicas x 4 vCPU (80 of the environment's 100 cores). Measured 25 Oct: with 24, all
+          // 21 Recap Factory films started together, Azure Speech throttled their QA checks and the
+          // run took 236 s; with 20 it took 158 s at half the compute per film
+          maxExecutions: 20
           pollingInterval: 15
           rules: [
             {
