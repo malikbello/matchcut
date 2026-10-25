@@ -27,6 +27,12 @@ function icon(id) {
   return s;
 }
 const secs = (s) => (s == null ? "–" : s < 90 ? `${Math.round(s)} s` : `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")} s`);
+// lines heard word for word, and lines checked for voice only (Naija; a name and a word or two)
+const qaLines = (q) => {
+  const heard = q.heard && !q.heard.endsWith("/0") ? `heard ${q.heard}` : "";
+  const parts = [heard, q.voiced ? `voiced ${q.voiced}` : ""].filter(Boolean).join(", ") || "no";
+  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines`;
+};
 const dollars = (d) => (d == null ? "–" : d < 0.1 ? `$${d.toFixed(3)}` : `$${d.toFixed(2)}`);
 
 async function api(path, options) {
@@ -198,7 +204,7 @@ function openFilm(f, label) {
   const q = f.qa || {};
   const facts = [
     `${f.duration ?? "?"} s film, made in ${Math.round(f.seconds ?? 0)} s on its own replica`,
-    `${q.words === false ? "Voiced" : "Heard"} ${q.heard ?? "?"} lines, read ${q.read ?? "?"} captions, ${q.lufs ?? "?"} LUFS`,
+    `${qaLines(q)}, read ${q.read ?? "?"} captions, ${q.lufs ?? "?"} LUFS`,
     f.cost ? `Cost ${dollars(f.cost.total)}: compute ${dollars(f.cost.compute)}, QA ${dollars(f.cost.qa)}` : "",
   ].filter(Boolean);
   const at = (s) => (s == null ? "" : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")} `);

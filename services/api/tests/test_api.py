@@ -474,6 +474,7 @@ def test_a_moment_carries_the_qa_agents_verdict(tmp_path):
     assert reel.qa(MATCH, "9x16", "goal-1", "en") == {
         "passed": True,
         "heard": "2/2",
+        "voiced": None,
         "read": "1/1",
         "lufs": -15.9,
         "words": True,

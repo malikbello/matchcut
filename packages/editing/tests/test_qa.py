@@ -120,3 +120,19 @@ def test_a_line_of_a_name_and_one_word_is_checked_for_voice_not_words():
     assert short["heard"]
     assert long["check"] == "words"  # four words to hear: judged word by word, and not heard
     assert not long["heard"]
+
+
+def test_a_summary_keeps_heard_and_voiced_apart():
+    report = {
+        "passed": True,
+        "lufs": -16.0,
+        "lines": [
+            {"at": 1.0, "heard": True, "check": "words"},
+            {"at": 4.0, "heard": True, "check": "words"},
+            {"at": 9.0, "heard": True, "check": "voiced"},
+        ],
+    }
+    brief = summary(report)
+    assert brief["heard"] == "2/2"
+    assert brief["voiced"] == "1/1"
+    assert brief["words"] is False
