@@ -36,6 +36,10 @@ NEAR = 0.66  # a word heard nearly as written counts ("bat" for "but", "don't" f
 # languages no recogniser hears word for word yet (Azure has no Pidgin model): their lines are
 # checked for being voiced where the plan puts them, not word by word, and the report says so
 PRESENCE_ONLY = {"pcm"}
+# a line with fewer words than this once the names are set aside ("Atenção a Quinouani...") cannot
+# be judged word by word: a recogniser that splits the name into words ("aqui não ani") swallows
+# the one short word left. It is checked for being voiced where the plan puts it, and says so.
+MIN_WORDS = 3
 
 
 @dataclass
@@ -149,7 +153,8 @@ def judge(
     for sp in spoken:
         near = " ".join(t for a, b, t in transcript if b >= sp.at - LISTEN_BEFORE_S and a <= sp.until)
         r = recall(sp.text, near, names)
-        presence = language in PRESENCE_ONLY
+        skip = {w for n in names for w in words(n)}
+        presence = language in PRESENCE_ONLY or len([w for w in words(sp.text) if w not in skip]) < MIN_WORDS
         report.lines.append(
             {
                 "at": sp.at,
