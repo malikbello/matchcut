@@ -48,6 +48,12 @@
 .f-cell.unchecked { border-style: dashed; border-color: var(--ink-600); color: var(--mist); cursor: pointer; }
 .f-cell.checked:hover, .f-cell.flagged:hover { transform: translateY(-1px); }
 .f-cell .icon { width: 16px; height: 16px; }
+.f-cell { position: relative; }
+.f-cell .ad { position: absolute; top: 3px; right: 4px; font: 800 8px/1 var(--ui); letter-spacing: 0.04em; padding: 1px 3px; border-radius: 3px; }
+.f-cell .ad.ok { background: var(--verified); color: var(--ink-950); }
+.f-cell .ad.flag { background: var(--floodlight); color: var(--ink-950); }
+.f-film-side #f-film-ad { justify-self: start; }
+.f-film-side #f-film-ad[aria-pressed="true"] { color: var(--ink-950); background: var(--verified); border-color: var(--verified); }
 .f-legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 .f-legend .dot.waiting { background: var(--ink-600); }
 .f-legend .dot.making { background: var(--floodlight); }

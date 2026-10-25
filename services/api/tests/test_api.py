@@ -5,10 +5,10 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 from matchcut_api import Settings, create_app
-from matchcut_api.app import qr_svg, sha256
+from matchcut_api.app import MOMENT_FILE, qr_svg, sha256
 from matchcut_api.cuts import CutRequest, Film, LocalCuts, progress
 from matchcut_api.factory import DiskBlobs, Factory
-from matchcut_api.reel import LocalPieces, Reel, moment_caption
+from matchcut_api.reel import LocalPieces, Reel, described_variant, moment_caption
 from matchcut_contracts import Cue, CueStatus, MomentKind
 
 CODE = "kickoff-2026"
@@ -583,3 +583,38 @@ def test_a_cut_for_a_player_with_no_moments_is_refused(settings):
     assert "no moments" in r.json()["detail"]
     assert client.post("/api/cuts", json={**body, "player": "Quinouani"}).status_code == 200
     assert [req.player for req in store.requests] == ["Quinouani"]
+
+
+def test_described_films_are_the_same_moments_with_the_describer(tmp_path, settings):
+    m = MOMENT_FILE.match("goal-1.en-NG.ad.mp4")
+    assert m is not None
+    assert m["key"] == "goal-1"
+    assert m["lang"] == "en-NG.ad"
+    assert described_variant("en-NG.ad") == ("en-NG", True)
+    assert described_variant("pcm") == ("pcm", False)
+    assert MOMENT_FILE.match("goal-1.en.xx.mp4") is None
+    # the reel lists the described film's own QA verdict
+    folder = tmp_path / "pieces" / MATCH / "9x16"
+    folder.mkdir(parents=True)
+    (folder / "goal-1.en.ad.qa.json").write_text(
+        json.dumps({"passed": True, "lines": [{"heard": True}]}), encoding="utf-8"
+    )
+    reel = Reel(LocalPieces(tmp_path / "pieces"), tmp_path, tmp_path, b"key")
+    described = reel.qa(MATCH, "9x16", "goal-1", "en.ad")
+    assert described is not None
+    assert described["passed"] is True
+    assert reel.qa(MATCH, "9x16", "goal-1", "en") is None
+    # a share link can carry the described film
+    token = reel.share_token(MATCH, "9x16", "goal-1", "en.ad")
+    assert reel.read_token(token) == (MATCH, "9x16", "goal-1", "en.ad")
+
+
+def test_a_cut_can_be_asked_for_with_audio_description(settings):
+    (settings.feeds_dir / f"{MATCH}.json.gz").write_bytes(gzip.compress(json.dumps(FEED).encode()))
+    store = FakeCuts()
+    client = TestClient(create_app(settings, cuts=store))
+    _login(client)
+    body = {"match": MATCH, "lang": "fr", "aspect": "9x16", "side": "home", "described": True}
+    assert client.post("/api/cuts", json=body).status_code == 200
+    assert store.requests[0].described is True
+    assert store.requests[0].message("c-0123456789ab")["described"] is True

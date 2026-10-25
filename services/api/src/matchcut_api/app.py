@@ -55,7 +55,7 @@ from matchcut_api.cuts import (
     LocalCuts,
 )
 from matchcut_api.factory import BusyError, DiskBlobs, Factory, LocalRunner, RationedError
-from matchcut_api.reel import MAX_WINDOW_MS, BlobPieces, LocalPieces, Reel
+from matchcut_api.reel import MAX_WINDOW_MS, BlobPieces, LocalPieces, Reel, described_variant
 
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
 LANG = re.compile(r"^[a-z]{2,3}(-[A-Z]{2})?$")  # BCP 47: en, en-NG, pcm, ar, yo
@@ -198,12 +198,14 @@ class ShareBody(BaseModel):
     aspect: str = Field(default="9x16", max_length=5)
     key: str = Field(max_length=40)
     lang: str = Field(default="en", max_length=8)
+    described: bool = False
 
 
 REEL_ASPECT = re.compile(r"^(9x16|16x9)$")
 REEL_KEY = re.compile(r"^(goal|conceded|chance)-\d{1,9}$|^window-\d{1,9}-\d{1,9}$")
 MOMENT_FILE = re.compile(
-    r"^(?P<key>(?:goal|conceded|chance)-\d{1,9}|window-\d{1,9}-\d{1,9})(?:\.(?P<lang>[a-zA-Z-]{2,6}))?\.(?P<ext>mp4|jpg)$"
+    r"^(?P<key>(?:goal|conceded|chance)-\d{1,9}|window-\d{1,9}-\d{1,9})"
+    r"(?:\.(?P<lang>[a-zA-Z-]{2,6}(?:\.ad)?))?\.(?P<ext>mp4|jpg)$"
 )
 
 
@@ -230,6 +232,8 @@ def share_page(base: str, token: str, found: tuple[str, str, str, str]) -> str:
     poster = f"{base}/s/{token}.jpg"  # chats (WhatsApp, iMessage, Slack) preview the image, not the video
     w, h = (720, 1280) if aspect == "9x16" else (1280, 720)
     desc = "Every fan's cut. Synthetic match, every line verified."
+    if _lang.endswith(".ad"):
+        desc += " Audio described for blind and partially sighted fans."
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -254,6 +258,7 @@ class CutBody(BaseModel):
     aspect: str = Field(default="9x16", max_length=5)
     side: str | None = Field(default=None, max_length=4)
     player: str | None = Field(default=None, max_length=60)
+    described: bool = False
 
 
 class SessionRequest(BaseModel):
@@ -448,7 +453,9 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
             raise HTTPException(422, f"{body.player} has no moments in this match")
         if not limiter.hit(per_hour, f"cuts:{client_id(request)}"):
             raise HTTPException(429, "too many cuts for now")
-        cut_id = store.submit(CutRequest(body.match, body.lang, body.aspect, body.side, body.player))
+        cut_id = store.submit(
+            CutRequest(body.match, body.lang, body.aspect, body.side, body.player, body.described)
+        )
         return {"id": cut_id, "status": "queued"}
 
     @app.get("/api/cuts/{cut_id}", dependencies=[Depends(require_session)])
@@ -495,15 +502,17 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
         lang: str = "en",
         aspect: str = "9x16",
         upto: int | None = None,
+        described: bool = False,
     ) -> dict:
         """The fan's moments up to the live clock, each ready to play and share when rendered."""
         if not MATCH_ID.match(match_id) or lang not in CUT_LANGUAGES or not REEL_ASPECT.match(aspect):
             raise HTTPException(422, "invalid request")
         focus = focus_of(side, player, match_id)
-        moments = reel.moments(match_id, focus, lang, aspect, upto)
+        moments = reel.moments(match_id, focus, lang, aspect, upto, described)
+        variant = f"{lang}.ad" if described else lang
         for m in moments:
             if m["ready"]:
-                reel.warm(match_id, aspect, m["key"], lang)  # mixed before the fan taps Play
+                reel.warm(match_id, aspect, m["key"], variant)  # mixed before the fan taps Play
         return {"moments": moments}
 
     @app.get("/media/moments/{match_id}/{aspect}/{name}", dependencies=[Depends(require_session)])
@@ -520,7 +529,7 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
             return FileResponse(
                 poster, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"}
             )
-        if lang not in CUT_LANGUAGES:
+        if described_variant(lang)[0] not in CUT_LANGUAGES:
             raise HTTPException(404, "not found")
         film = reel.moment_film(match_id, aspect, key, lang)
         if film is None:
@@ -552,7 +561,8 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
             raise HTTPException(422, "invalid request")
         if body.lang not in CUT_LANGUAGES:
             raise HTTPException(422, "invalid request")
-        return {"url": f"/s/{reel.share_token(body.match, body.aspect, body.key, body.lang)}"}
+        lang = f"{body.lang}.ad" if body.described else body.lang
+        return {"url": f"/s/{reel.share_token(body.match, body.aspect, body.key, lang)}"}
 
     @app.get("/s/{token}.mp4")
     def shared_film(token: str, request: Request) -> StreamingResponse:

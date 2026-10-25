@@ -32,7 +32,7 @@ PRICES = {
 }
 STALE_S = 900  # a film still being made after this long has lost its replica
 RUN_ID = re.compile(r"^f-[0-9a-f]{12}$")
-FILM_ID = re.compile(r"^(home|away|p-[a-z0-9-]+)\.[A-Za-z-]+$")
+FILM_ID = re.compile(r"^(home|away|p-[a-z0-9-]+)\.[A-Za-z-]+(\.ad)?$")  # .ad: the described film
 
 
 def root(match: str, aspect: str) -> str:
@@ -92,6 +92,7 @@ def run_state(run: dict[str, Any], films: dict[str, dict[str, Any]], now: float)
                 "duration": st.get("duration"),
                 "cost": st.get("cost"),
                 "qa": st.get("qa"),
+                "ad": st.get("ad"),  # the described film: its QA verdict, how many lines described
             }
         )
     counts = dict.fromkeys(("waiting", "making", "checked", "flagged", "unchecked", "failed"), 0)

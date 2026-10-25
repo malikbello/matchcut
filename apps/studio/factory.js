@@ -98,7 +98,8 @@ function render() {
   $("f-lede").textContent = `At the whistle, ${films.length} films: for ${fans}, in ${langs.length} languages, ` +
     `one render job replica each, side by side on Azure Container Apps. Each film is joined from the ` +
     `${pieces.moments ?? ""} moment clips rendered once during the match, mixed in the fan's language, ` +
-    `then listened to and read by the QA agent before any fan sees it.`;
+    `then listened to and read by the QA agent before any fan sees it.` +
+    (films.some((f) => f.ad) ? " Every film is made a second time with audio description, for blind and partially sighted fans, and checked too." : "");
 
   const c = { waiting: films.length, making: 0, checked: 0, flagged: 0, unchecked: 0, failed: 0, ...run.counts };
   const made = c.checked + c.flagged + c.unchecked;
@@ -193,19 +194,24 @@ function cell(f, label) {
   else if (f.status === "unchecked") b.append(el("span", { class: "pip" }));
   else b.append(el("span", { class: "pip" }));
   b.append(el("span", { class: "t" }, f.at != null ? `${Math.round(f.at)}s` : ""));
+  if (f.ad) b.append(el("span", { class: `ad ${f.ad.qa?.passed ? "ok" : "flag"}`, title: "Also made with audio description" }, "AD"));
   b.setAttribute("aria-label", `${name}: ${f.status}`);
   b.title = done ? `${name}: ${f.status}, made ${Math.round(f.at)} s into the run` : `${name}: ${f.status}`;
   if (done) b.addEventListener("click", () => openFilm(f, label));
   return b;
 }
 
-function openFilm(f, label) {
+function openFilm(f, label, withAd = false) {
   const run = state.run;
-  $("f-video").src = `/media/factory/${encodeURIComponent(state.match)}/${ASPECT}/${run.run}/${f.id}.mp4`;
+  $("f-video").src = `/media/factory/${encodeURIComponent(state.match)}/${ASPECT}/${run.run}/${f.id}${withAd ? ".ad" : ""}.mp4`;
+  $("f-film-ad").hidden = !f.ad;
+  $("f-film-ad").setAttribute("aria-pressed", String(withAd));
+  $("f-film-ad").querySelector("span").textContent = withAd ? "Play without audio description" : "Play with audio description";
+  $("f-film-ad").onclick = () => openFilm(f, label, !withAd);
   const verdict = { checked: "Checked", flagged: "Flagged", unchecked: "Not checked yet" }[f.status] || "";
   $("f-film-kicker").textContent = `${LANGS[f.lang] || f.lang} · ${verdict}`;
   $("f-film-title").textContent = f.focus.side ? `${label} fans` : label;
-  const q = f.qa || {};
+  const q = (withAd ? f.ad?.qa : f.qa) || {};
   const facts = [
     `${f.duration ?? "?"} s film, made in ${Math.round(f.seconds ?? 0)} s on its own replica`,
     `${qaLines(q)}, read ${q.read ?? "?"} captions, ${q.lufs ?? "?"} LUFS`,
@@ -215,7 +221,8 @@ function openFilm(f, label) {
   const flagged = (q.issues || []).map((i) => el("li", { class: "issue" },
     el("strong", {}, `${at(i.at)}${i.kind}`), " ", el("span", { dir: "auto" }, i.text)));
   $("f-film-facts").replaceChildren(...facts.map((t) => el("li", {}, t)), ...flagged);
-  $("f-film").showModal();
+  if (withAd && f.ad) facts.unshift(`Audio described: ${f.ad.lines} descriptions in the gaps between the commentary`);
+  if (!$("f-film").open) $("f-film").showModal();
   $("f-video").play().catch(() => {});
 }
 

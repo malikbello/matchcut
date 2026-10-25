@@ -42,6 +42,7 @@ class CutRequest:
     aspect: str
     side: str | None = None
     player: str | None = None
+    described: bool = False  # with the audio description, for blind and partially sighted fans
 
     def message(self, cut_id: str) -> dict[str, Any]:
         return {
@@ -51,6 +52,7 @@ class CutRequest:
             "player": self.player,
             "lang": self.lang,
             "aspect": self.aspect,
+            "described": self.described,
         }
 
 
@@ -79,7 +81,7 @@ class Assembler:
         from matchcut_editing.assembly import fan_cut  # noqa: PLC0415
 
         focus = {"player": req.player} if req.player else {"side": req.side or "home"}
-        return fan_cut(self.data, req.match, focus, req.lang, req.aspect, manifest)
+        return fan_cut(self.data, req.match, focus, req.lang, req.aspect, manifest, described=req.described)
 
     def make(self, cut: Any, pieces: list[Path], work: Path) -> Path:
         from matchcut_editing.assembly import assemble_cut  # noqa: PLC0415

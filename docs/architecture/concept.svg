@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1680" height="940" viewBox="0 0 1680 940" role="img" aria-labelledby="t d">
 <title id="t">How Matchcut works</title>
-<desc id="d">Four stages: a fictional league plays a live match; code measures and agents explain; fans see verified live graphics; after the whistle every fan gets their own voiced highlights film. A trust layer checks everything, and it runs on Microsoft Azure.</desc>
+<desc id="d">Four stages: a fictional league plays a live match; code measures and agents explain; fans see verified live graphics; after the whistle every fan gets their own voiced highlights film, audio described for blind and partially sighted fans. A trust layer checks everything, and it runs on Microsoft Azure.</desc>
 <defs>
 <style>
 .f{font-family:'Segoe UI',Inter,system-ui,-apple-system,Helvetica,Arial,sans-serif}
@@ -76,6 +76,8 @@
   <text class="b" x="1256" y="384" style="fill:#C9D2DD">Voiced and captioned in your</text>
   <text class="b" x="1256" y="406" style="fill:#C9D2DD">language, for phones and TV.</text>
   <text class="b" x="1256" y="442" style="fill:#C9D2DD">A QA agent hears and reads every film.</text>
+  <text class="b" x="1256" y="478" style="fill:#2DE3A0;font-weight:600">Audio described for blind and</text>
+  <text class="b" x="1256" y="500" style="fill:#2DE3A0;font-weight:600">partially sighted fans.</text>
   <rect x="1256" y="540" width="332" height="56" rx="10" fill="#141A22"/>
   <text class="s" x="1274" y="563" style="fill:#F4F6F9">21 films in under 3 min · 2 cents each</text>
   <text class="m" x="1274" y="583" style="fill:#9AA6B5">Share by link, QR or download</text>

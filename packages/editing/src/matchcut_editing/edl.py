@@ -34,6 +34,8 @@ CAPTION_LANGUAGES = {"en-NG": {"en-NG", "en"}, "pcm": {"pcm", "en-NG", "en"}}
 MAX_FILM_S = 95.0
 VOICE_GAP_S = 0.25
 MAX_VOICE_SHIFT_S = 3.5  # a line that would land later than this after its moment is dropped
+MAX_DESCRIBE_SHIFT_S = 3.0  # a description says what is on screen now: a little late, or not at all
+DESCRIBE_GAP_S = 0.15  # the describer's breath after another voice (a describer keeps the pace up)
 REPLAY_ANALYSIS_AT_S = 8.4  # into the package: the first replay angle has started
 CALL_LINE_TAIL_S = 0.6  # the caller's words stay up this long after his voice stops
 MIN_CALL_LINE_S = 1.0  # a call line cut shorter than this by a caption never airs
@@ -224,7 +226,9 @@ def build_cut(
     package_durations: dict[int, float],
     clip_durations: dict[str, float],
     language_name: str = "",
+    descriptions: list[dict] | None = None,
 ) -> Cut:
+    """A fan's film; with `descriptions`, the described film (audio description in the gaps)."""
     home, away = feed["teams"]["home"], feed["teams"]["away"]
     picks = _fit(pick_moments(feed, cues, focus), package_durations)
     title = title_card(feed, focus, language, language_name)
@@ -233,6 +237,8 @@ def build_cut(
     _lay_out(cut, picks, TITLE_S, package_durations)
     cut.segments.append(end_card(feed, language))
     _voice_track(cut, picks, cut.windows, cues, calls, clip_durations)
+    if descriptions:
+        _describe_track(cut, picks, cut.windows, descriptions, clip_durations)
     cut.captions = _captions(cut, cues)
     return cut
 
@@ -247,9 +253,11 @@ def moment_cut(
     aspect: str,
     package_durations: dict[int, float],
     clip_durations: dict[str, float],
+    descriptions: list[dict] | None = None,
 ) -> Cut:
     """One moment (or any stretch of play) as its own short film, for the live reel and for
-    sharing: the clip with its soundtrack (calls, verified line, crowd), no cards."""
+    sharing: the clip with its soundtrack (calls, verified line, crowd), no cards. With
+    `descriptions`, the described film."""
     if key.startswith("window-"):
         home, away = feed["teams"]["home"], feed["teams"]["away"]
         cut = Cut(feed["match_id"], language, aspect, key, f"{home['name']} v {away['name']}")
@@ -258,6 +266,8 @@ def moment_cut(
         cut.windows = [(0.0, seg.duration, seg.t0, seg.t0 + seg.duration * 1000)]
         cut.crowd_high = [(max(0.0, seg.duration - 4.0), seg.duration)]  # the crowd rises with the move
         _voice_track(cut, [], cut.windows, cues, calls, clip_durations)
+        if descriptions:
+            _describe_track(cut, [], cut.windows, descriptions, clip_durations)
         cut.captions = _captions(cut, cues)
         return cut
     kind, t = key.rsplit("-", 1)
@@ -266,6 +276,8 @@ def moment_cut(
     cut = Cut(feed["match_id"], language, aspect, key, f"{home['name']} v {away['name']}")
     _lay_out(cut, picks, 0.0, package_durations)
     _voice_track(cut, picks, cut.windows, cues, calls, clip_durations)
+    if descriptions:
+        _describe_track(cut, picks, cut.windows, descriptions, clip_durations)
     cut.captions = _captions(cut, cues)
     return cut
 
@@ -413,6 +425,54 @@ def clip_end(cut: Cut, at: float) -> float:
             spans.append([start, start + seg.duration, seg.clip])
         start += seg.duration
     return next((b for a, b, _c in spans if a <= at < b), cut.duration)
+
+
+def clip_at(cut: Cut, at: float) -> str:
+    """The clip playing at film second `at`."""
+    start = 0.0
+    for seg in cut.segments:
+        if start <= at < start + seg.duration:
+            return seg.clip
+        start += seg.duration
+    return ""
+
+
+def _describe_track(
+    cut: Cut,
+    picks: list[dict[str, Any]],
+    windows: list[tuple[float, float, float, float]],
+    descriptions: list[dict],
+    clip_durations: dict[str, float],
+) -> None:
+    """The describer in the gaps: after the caller and the analyst are placed, each description
+    takes the first gap at or after its moment, never over a voice and never over a cut; one
+    that would land more than MAX_DESCRIBE_SHIFT_S late is left out (it describes the past).
+    Where gaps are scarce the action goes first, then replays, then the ball, then the clock."""
+    package_at = {p["t"]: p["package_at"] for p in picks if "package_at" in p}
+    wanted: list[tuple[float, dict]] = []
+    for d in descriptions:
+        if d.get("at_s") is not None:  # a package line: into its goal's celebration and replays
+            if d["t_ms"] in package_at:
+                wanted.append((package_at[d["t_ms"]] + d["at_s"], d))
+            continue
+        for film_a, _film_b, m_from, m_to in windows:
+            if m_from <= d["t_ms"] <= m_to:
+                wanted.append((film_a + (d["t_ms"] - m_from) / 1000, d))
+    taken = sorted((e.at, e.at + e.duration) for e in cut.audio if e.role != "roar")
+    for t, d in sorted(wanted, key=lambda w: (w[1].get("priority", 3), w[0])):
+        if d.get("clip") and clip_at(cut, t) != d["clip"]:
+            continue  # a scene line opening one clip is not said in another
+        length = clip_durations.get(d["audio"], 2.5)
+        start = t
+        for a, b in taken:
+            if start + length + DESCRIBE_GAP_S <= a:
+                break
+            start = max(start, b + DESCRIBE_GAP_S)
+        if start - t > MAX_DESCRIBE_SHIFT_S or start + length > min(cut.duration, clip_end(cut, t)):
+            continue
+        cut.audio.append(AudioEvent(round(start, 3), d["audio"], "describe", length))
+        taken = sorted([*taken, (start, start + length)])
+    cut.audio.sort(key=lambda a: a.at)
 
 
 def call_lines(cut: Cut, calls: list[dict]) -> list[tuple[float, float, str]]:

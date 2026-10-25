@@ -51,6 +51,7 @@ COPY --from=studio /studio/dist /app/apps/studio/dist
 COPY out/feeds /app/out/feeds
 COPY out/insights /app/out/insights
 COPY out/calls /app/out/calls
+COPY out/describe /app/out/describe
 COPY out/media /app/out/media
 ENV MATCHCUT_STUDIO_DIR=/app/apps/studio MATCHCUT_CUES_DIR=/app/out/insights \
     MATCHCUT_FEEDS_DIR=/app/out/feeds MATCHCUT_MEDIA_DIR=/app/out/media MATCHCUT_CALLS_DIR=/app/out/calls \

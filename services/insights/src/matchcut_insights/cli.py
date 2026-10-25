@@ -273,6 +273,23 @@ def cmd_calls(args: argparse.Namespace) -> None:
     print(f"{len(calls)} calls in {len({c.language for c in calls})} languages -> {out}")
 
 
+def cmd_describe(args: argparse.Namespace) -> None:
+    """Write (and voice) a match's audio description: the live track and each moment clip's."""
+    from matchcut_insights.describe import describe  # noqa: PLC0415
+    from matchcut_insights.voice import voice_descriptions  # noqa: PLC0415
+
+    feed = json.loads(gzip.decompress((Path(args.feeds) / f"{args.match}.json.gz").read_bytes()))
+    moments = [{"kind": k, "t": g["t"]} for g in feed.get("goals", []) for k in ("goal", "conceded")]
+    descs = describe(args.match, feed, moments)
+    if args.voice:
+        voiced = voice_descriptions(descs, args.match, AzureSpeech.from_env(), args.media)
+        print(f"voiced {voiced} descriptions -> {args.media}/audio/{args.match}")
+    out = Path(args.out_dir) / f"{args.match}.json"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps([d.as_dict() for d in descs], ensure_ascii=False, indent=0), encoding="utf-8")
+    print(f"{len(descs)} descriptions in {len({d.language for d in descs})} languages -> {out}")
+
+
 def cmd_voice(args: argparse.Namespace) -> None:
     """Voice a match's verified lines again wherever the words changed since they were voiced
     (no line is rewritten): every voice file says what its caption says."""
@@ -318,6 +335,12 @@ def main(argv: list[str] | None = None) -> None:
     c.add_argument("--media", default="out/media")
     c.add_argument("--out-dir", default="out/calls")
     c.add_argument("--feeds", default="out/feeds", help="tracking feeds, for the calls over solo runs")
+    d = sub.add_parser("describe", help="write a match's audio description (no model needed)")
+    d.add_argument("--match", required=True)
+    d.add_argument("--voice", action="store_true", help="voice it with Azure AI Speech")
+    d.add_argument("--feeds", default="out/feeds")
+    d.add_argument("--media", default="out/media")
+    d.add_argument("--out-dir", default="out/describe")
     v = sub.add_parser("voice", help="voice a match's lines again wherever the words changed")
     v.add_argument("--match", required=True)
     v.add_argument("--cues", help="the match's lines (default out/insights/<match>.jsonl)")
@@ -325,6 +348,9 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     if args.cmd == "voice":
         cmd_voice(args)
+        return
+    if args.cmd == "describe":
+        cmd_describe(args)
         return
     if args.cmd == "redteam":
         cmd_redteam(args)

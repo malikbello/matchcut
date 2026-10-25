@@ -119,6 +119,12 @@ class BlobPieces:
         return json.loads(p.read_text(encoding="utf-8")) if p else None
 
 
+def described_variant(lang: str) -> tuple[str, bool]:
+    """'en.ad' -> ('en', True): a described film is its language's film with audio description."""
+    base, _, ad = lang.partition(".")
+    return base, ad == "ad"
+
+
 # the caption kinds that tell each kind of moment (a goal against is still told as a goal)
 CAPTION_KINDS = {"goal": {"goal"}, "conceded": {"goal"}, "chance": {"big_chance", "great_save"}}
 
@@ -174,7 +180,13 @@ class Reel:
                 self._warming.discard(name)
 
     def moments(
-        self, match: str, focus: dict[str, str], lang: str, aspect: str, upto: int | None
+        self,
+        match: str,
+        focus: dict[str, str],
+        lang: str,
+        aspect: str,
+        upto: int | None,
+        described: bool = False,
     ) -> list[dict]:
         """The fan's moments so far: a goal for them, a goal against (their club), their chances."""
         from matchcut_editing.edl import pick_moments  # noqa: PLC0415
@@ -199,7 +211,7 @@ class Reel:
                     "text": cue["text"] if cue else None,
                     "verified": bool(cue and cue.get("status") == "verified"),
                     "ready": self.pieces.exists(match, aspect, f"{key}.{lang}.mp4"),
-                    "qa": self.qa(match, aspect, key, lang),
+                    "qa": self.qa(match, aspect, key, f"{lang}.ad" if described else lang),
                 }
             )
         return out
@@ -227,8 +239,9 @@ class Reel:
 
     def moment_film(self, match: str, aspect: str, key: str, lang: str) -> Film | None:
         """A moment as a short film with its soundtrack; mixed once (ahead of play, or on first
-        play), then cached."""
+        play), then cached. `lang` "en.ad": the described film (audio description in the gaps)."""
         name = f"{key}.{lang}.share.mp4"
+        lang, described = described_variant(lang)
         with self._lock(f"{match}/{aspect}/{name}"):
             film = self.pieces.film(match, aspect, name)
             if film:
@@ -243,9 +256,12 @@ class Reel:
 
             inp = load(self.data, match, lang)
             packages = {int(t): d for t, d in manifest["packages"].items()}
+            if described and not inp.descriptions:
+                return None  # no audio description for this match
             cut = moment_cut(
                 inp.feed, inp.cues, inp.calls, key, language=lang, aspect=aspect,
                 package_durations=packages, clip_durations=inp.durations,
+                descriptions=inp.descriptions if described else None,
             )  # fmt: skip
             with tempfile.TemporaryDirectory() as tmp:
                 made = assemble_cut(cut, [clip], self.data / "media", self.crowd, Path(tmp), self.ffmpeg)

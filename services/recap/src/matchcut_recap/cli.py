@@ -48,7 +48,17 @@ def make_part(a: argparse.Namespace) -> tuple[Cut, Path]:
         if calls_path.is_file()
         else []
     )
-    files = {c["audio"] for c in cues + calls if c.get("audio")}
+    described_path = root / "describe" / f"{a.match}.json"
+    descriptions = (
+        [
+            d
+            for d in json.loads(described_path.read_text(encoding="utf-8"))
+            if d["language"] == a.lang and d.get("audio")
+        ]
+        if getattr(a, "described", False) and described_path.is_file()
+        else []
+    )
+    files = {c["audio"] for c in cues + calls + descriptions if c.get("audio")}
     durations = _durations(files, root / "media", a.ffprobe)
     focus = {"player": a.player} if a.player else {"side": a.side}
     stem = _stem(a)
@@ -66,6 +76,7 @@ def make_part(a: argparse.Namespace) -> tuple[Cut, Path]:
             package_durations=packages,
             clip_durations=durations,
             language_name=str(LANGUAGE_NAMES.get(a.lang) or a.lang),
+            descriptions=descriptions or None,
         )
         stem.with_suffix(".edl.json").write_text(
             json.dumps(cut.as_dict(), ensure_ascii=False, indent=1), encoding="utf-8"

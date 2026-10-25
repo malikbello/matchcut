@@ -10,7 +10,7 @@ from __future__ import annotations
 import gzip
 import json
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 LANGUAGE_NAMES = {
@@ -95,6 +95,7 @@ class MatchInputs:
     cues: list[dict]
     calls: list[dict]
     durations: dict[str, float]
+    descriptions: list[dict] = field(default_factory=list)  # the describer's voiced lines
 
 
 def load(data: Path, match: str, lang: str, ffprobe: str = "ffprobe") -> MatchInputs:
@@ -107,8 +108,18 @@ def load(data: Path, match: str, lang: str, ffprobe: str = "ffprobe") -> MatchIn
         if calls_path.is_file()
         else []
     )
-    files = {c["audio"] for c in cues + calls if c.get("audio")}
-    return MatchInputs(feed, cues, calls, voice_durations(files, data / "media", ffprobe))
+    described = data / "describe" / f"{match}.json"
+    descriptions = (
+        [
+            d
+            for d in json.loads(described.read_text(encoding="utf-8"))
+            if d["language"] == lang and d.get("audio")
+        ]
+        if described.is_file()
+        else []
+    )
+    files = {c["audio"] for c in cues + calls + descriptions if c.get("audio")}
+    return MatchInputs(feed, cues, calls, voice_durations(files, data / "media", ffprobe), descriptions)
 
 
 def focuses(feed: dict) -> list[dict[str, str]]:
