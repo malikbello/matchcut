@@ -39,7 +39,9 @@ LOCALES = {
     "pcm": "en-NG",
     "fr": "fr-FR",
     "es": "es-ES",
-    "pt": "pt-PT",
+    # European Portuguese fast transcription answered 429 "Resource Exhausted" on this resource
+    # even when idle (25 Oct); the Brazilian recogniser hears the lines well enough to check words
+    "pt": "pt-BR",
     "ar": "ar-SA",
 }
 READER = (
