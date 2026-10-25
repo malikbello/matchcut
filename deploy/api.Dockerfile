@@ -1,5 +1,5 @@
 # Matchcut API and Studio: one container serving the Studio, its 3D bundle, the match data and the API.
-# Built in Azure (az acr build), so no local Docker is needed.
+# Built with Docker and pushed to the registry (deploy/deploy.sh describes the release).
 
 # ---------------------------------------------------------------- the Studio's 3D bundle
 FROM node:22-slim AS studio
@@ -11,12 +11,14 @@ RUN npm run build
 
 # ---------------------------------------------------------------- the API, from the lockfile
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS app
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+# downloads are kept in a build cache: a code change reinstalls from it without the network, and
+# a slow connection gets 5 minutes per file (a retry keeps every file that already arrived)
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_HTTP_TIMEOUT=300
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages packages
 COPY services services
-RUN uv sync --locked --no-dev --package matchcut-api
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --package matchcut-api
 
 FROM python:3.12-slim-bookworm
 # ffmpeg: fan cuts are assembled here from pre-rendered pieces (a lossless join and a sound mix)
@@ -26,6 +28,7 @@ WORKDIR /app
 COPY --from=app /app /app
 # the Studio: page, styles, fonts, assets (CC0 and the licensed private library) and the bundle
 COPY --from=studio /studio/index.html /studio/studio.js /studio/studio.css /app/apps/studio/
+COPY --from=studio /studio/factory.html /studio/factory.js /studio/factory.css /app/apps/studio/
 COPY --from=studio /studio/fonts /app/apps/studio/fonts
 COPY --from=studio /studio/assets /app/apps/studio/assets
 COPY --from=studio /studio/dist /app/apps/studio/dist

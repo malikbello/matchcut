@@ -13,12 +13,14 @@ RUN npm run build
 
 # ---------------------------------------------------------------- the job, from the lockfile
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS app
-ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never
+# downloads are kept in a build cache: a code change reinstalls from it without the network, and
+# a slow connection gets 5 minutes per file (a retry keeps every file that already arrived)
+ENV UV_COMPILE_BYTECODE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never UV_HTTP_TIMEOUT=300
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 COPY packages packages
 COPY services services
-RUN uv sync --locked --no-dev --package matchcut-recap
+RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --package matchcut-recap
 
 FROM python:3.12-slim-bookworm
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright PATH="/app/.venv/bin:$PATH"
