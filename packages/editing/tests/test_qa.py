@@ -108,3 +108,15 @@ def test_a_summary_says_what_failed_in_film_order():
         ("level", None),
     ]
     assert summary({"passed": True, "lufs": -16.0})["issues"] == []
+
+
+def test_a_line_of_a_name_and_one_word_is_checked_for_voice_not_words():
+    """'Atenção a Quinouani' heard as 'Atenção aqui não ani': the split name ate the 'a'."""
+    spoken = [Spoken(2.4, "Atenção a Quinouani...", "call"), Spoken(8.0, "Quinouani is in on goal", "call")]
+    transcript = [(2.5, 3.6, "Atenção aqui não ani."), (8.1, 9.2, "Quinuani Izinango.")]
+    report = judge("f.mp4", "pt", spoken, [], transcript, {}, -16.0, ["Quinouani"])
+    short, long = report.lines
+    assert short["check"] == "voiced"
+    assert short["heard"]
+    assert long["check"] == "words"  # four words to hear: judged word by word, and not heard
+    assert not long["heard"]

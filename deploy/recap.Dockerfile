@@ -22,16 +22,24 @@ COPY packages packages
 COPY services services
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --locked --no-dev --package matchcut-recap
 
+# ---------------------------------------------------------------- the browser installer, from the lockfile alone
+# only the Playwright version uv.lock pins: this stage, and the heavy layer that uses it, rebuild
+# when that pin changes, never for a code change (the full environment's bytecode differs per build)
+FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim AS browser
+COPY uv.lock /tmp/uv.lock
+RUN v=$(sed -n '/^name = "playwright"$/{n;s/^version = "\(.*\)"$/\1/p}' /tmp/uv.lock) \
+    && test -n "$v" && uv venv /opt/pw && uv pip install --python /opt/pw/bin/python "playwright==$v"
+
 FROM python:3.12-slim-bookworm
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright PATH="/app/.venv/bin:$PATH"
-# the environment first (it changes only with the lockfile; our own packages are installed
-# editable), then the heavy system layer, so code changes never re-download the browser or ffmpeg
-COPY --from=app /app/.venv /app/.venv
-# ffmpeg and Mesa from Debian; the headless shell and exactly the libraries it needs from Playwright
-RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries \
+# the heavy system layer first: ffmpeg and Mesa from Debian; the headless shell and exactly the
+# libraries it needs from Playwright (its installer is mounted for this step, not kept)
+RUN --mount=type=bind,from=browser,source=/opt/pw,target=/opt/pw,rw \
+    echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80retries \
     && apt-get update && apt-get install -y --no-install-recommends ffmpeg libgl1-mesa-dri libegl1 \
-    && /app/.venv/bin/python -m playwright install --with-deps --only-shell chromium \
+    && /opt/pw/bin/python -m playwright install --with-deps --only-shell chromium \
     && rm -rf /var/lib/apt/lists/*
+COPY --from=app /app/.venv /app/.venv
 COPY --from=app /app/pyproject.toml /app/uv.lock /app/
 COPY --from=app /app/packages /app/packages
 COPY --from=app /app/services /app/services
