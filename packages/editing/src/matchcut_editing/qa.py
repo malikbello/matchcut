@@ -158,12 +158,21 @@ def judge(
                 "recall": round(r, 2),
                 "heard": bool(words(near)) if presence else r >= HEARD,
                 "check": "voiced" if presence else "words",
+                "heard_as": near[:300],  # what the recogniser heard there: a failure explains itself
             }
         )
     for sh in shown:
-        r = recall(sh.text, reads.get(sh.middle, ""))
+        got = reads.get(sh.middle, "")
+        r = recall(sh.text, got)
         report.captions.append(
-            {"at": sh.middle, "kind": sh.kind, "text": sh.text, "recall": round(r, 2), "read": r >= READ}
+            {
+                "at": sh.middle,
+                "kind": sh.kind,
+                "text": sh.text,
+                "recall": round(r, 2),
+                "read": r >= READ,
+                "read_as": got[:300],
+            }
         )
     loud = lufs is not None and abs(lufs - TARGET_LUFS) <= LUFS_TOLERANCE
     report.passed = all(x["heard"] for x in report.lines) and all(x["read"] for x in report.captions) and loud

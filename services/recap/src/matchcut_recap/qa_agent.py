@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import random
 import re
 import subprocess
 import tempfile
@@ -21,6 +22,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import httpx
 from matchcut_editing.edl import Cut
@@ -29,6 +31,8 @@ from matchcut_editing.qa import QAReport, expectations, judge
 STT_PATH = "/speechtotext/transcriptions:transcribe?api-version=2024-11-15"
 CHAT_API = "2025-04-01-preview"
 # the recogniser's locale for each film language (Pidgin is heard with the Nigerian English model)
+RETRY_STATUS = {429, 500, 502, 503, 504}  # throttled or briefly unavailable: worth another try
+RETRIES = 8  # about 2 minutes of waiting at most, when many films are checked at once
 LOCALES = {
     "en": "en-GB",
     "en-NG": "en-NG",
@@ -65,6 +69,7 @@ class Perception:
     model: str = "gpt-5-mini"
     ffmpeg: str = "ffmpeg"
     client: httpx.Client | None = None
+    sleep: Callable[[float], None] = time.sleep
 
     @classmethod
     def from_env(cls, ffmpeg: str = "ffmpeg") -> Perception:
@@ -93,6 +98,27 @@ class Perception:
             self.client = httpx.Client(timeout=120)
         return self.client
 
+    def _post(self, url: str, **kwargs: Any) -> httpx.Response:
+        """A request that waits out throttling: Azure AI answers 429 when many films are checked
+        at once (a Recap Factory run checks twenty side by side). Retry-After is honoured;
+        otherwise the wait doubles, with jitter so replicas do not retry in step."""
+        for attempt in range(RETRIES):
+            last = attempt == RETRIES - 1
+            try:
+                r = self.http.post(url, headers={"Authorization": f"Bearer {self.token()}"}, **kwargs)
+            except httpx.TransportError:
+                if last:
+                    raise
+                self.sleep(min(30.0, 2.0**attempt) + random.random())
+                continue
+            if r.status_code not in RETRY_STATUS or last:
+                r.raise_for_status()
+                return r
+            after = r.headers.get("Retry-After", "")
+            wait = float(after) if after.replace(".", "", 1).isdigit() else min(30.0, 2.0**attempt)
+            self.sleep(min(60.0, wait) + random.random())
+        raise AssertionError("unreachable")
+
     def listen(
         self, film: Path, language: str, usage: dict[str, float] | None = None
     ) -> list[tuple[float, float, str]]:
@@ -119,15 +145,13 @@ class Perception:
             if usage is not None:  # 16 kHz mono 16-bit after a 44-byte header
                 usage["audio_s"] = usage.get("audio_s", 0) + max(0, wav.stat().st_size - 44) / 32000
             definition = json.dumps({"locales": [LOCALES.get(language, "en-GB")]})
-            r = self.http.post(
+            r = self._post(
                 self.endpoint + STT_PATH,
-                headers={"Authorization": f"Bearer {self.token()}"},
                 files={
                     "audio": ("sound.wav", wav.read_bytes(), "audio/wav"),
                     "definition": (None, definition),
                 },
             )
-        r.raise_for_status()
         return [
             (
                 p["offsetMilliseconds"] / 1000,
@@ -169,9 +193,8 @@ class Perception:
                     out[s] = ""
                     continue
                 image = "data:image/jpeg;base64," + base64.b64encode(jpg.read_bytes()).decode()
-                r = self.http.post(
+                r = self._post(
                     f"{self.endpoint}/openai/deployments/{self.model}/chat/completions?api-version={CHAT_API}",
-                    headers={"Authorization": f"Bearer {self.token()}"},
                     json={
                         "messages": [
                             {"role": "system", "content": READER},
@@ -181,7 +204,6 @@ class Perception:
                         "reasoning_effort": "minimal",
                     },
                 )
-                r.raise_for_status()
                 body = r.json()
                 if usage is not None:
                     used = body.get("usage") or {}
