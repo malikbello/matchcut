@@ -68,7 +68,12 @@ def _status(st: dict[str, Any], now: float) -> str:
     if status == "making" and now - st.get("started", now) > STALE_S:
         return "failed"
     if status == "done":
-        return "checked" if (st.get("qa") or {}).get("passed") else "flagged"
+        qa = st.get("qa") or {}
+        if qa.get("passed"):
+            return "checked"
+        # the QA agent could not hear or read it (the AI service had no capacity): not a fault
+        unheard = any(i.get("kind") == "not checked" for i in qa.get("issues", []))
+        return "unchecked" if unheard else "flagged"
     return status
 
 
@@ -89,10 +94,10 @@ def run_state(run: dict[str, Any], films: dict[str, dict[str, Any]], now: float)
                 "qa": st.get("qa"),
             }
         )
-    counts = dict.fromkeys(("waiting", "making", "checked", "flagged", "failed"), 0)
+    counts = dict.fromkeys(("waiting", "making", "checked", "flagged", "unchecked", "failed"), 0)
     for c in cells:
         counts[c["status"]] += 1
-    made = [films[c["id"]] for c in cells if c["status"] in ("checked", "flagged")]
+    made = [films[c["id"]] for c in cells if c["status"] in ("checked", "flagged", "unchecked")]
     # replicas at work over time: +1 when a film starts, -1 when it is made
     steps = sorted(
         [(st["started"] - t0, 1, 0) for st in films.values() if st.get("started")]
@@ -120,7 +125,7 @@ def run_state(run: dict[str, Any], films: dict[str, dict[str, Any]], now: float)
         "all_films_s": round(max(ends) - t0, 1) if finished and ends else None,
         "peak_replicas": peak,
         "cost_per_film": mean,
-        "qa_passed": f"{counts['checked']}/{len(made)}",
+        "qa_passed": f"{counts['checked']}/{counts['checked'] + counts['flagged']}",
         "timeline": timeline,
         "pieces": run.get("pieces"),
     }

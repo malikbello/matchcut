@@ -278,6 +278,7 @@ body.render.aspect-9x16 .film-card .fc-sub { font-size: 26px; max-width: 90%; }
 .reel-item .qa .icon { width: 12px; height: 12px; }
 .reel-item .qa.ok { color: var(--verified); border: 1px solid color-mix(in srgb, var(--verified) 45%, transparent); }
 .reel-item .qa.flag { color: var(--floodlight); border: 1px solid color-mix(in srgb, var(--floodlight) 45%, transparent); }
+.reel-item .qa.wait { color: var(--mist); border: 1px dashed var(--ink-600); }
 .moment-qa { margin: -4px 0 10px; }
 .moment-qa:empty { display: none; }
 /* wide screens: the vertical film on the left, its words, actions and the QR hand-over beside it */
