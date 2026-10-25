@@ -8,33 +8,32 @@ Two views, from broad to detailed, following the Azure Well-Architected guidance
 | Component and deployment | [azure-architecture.svg](azure-architecture.svg) | Which Azure services, inside which boundaries, connected how? |
 
 ## Main flow (numbers match the component diagram)
-1. `sim` publishes match events and 10 Hz tracking to Event Hubs.
-2. `renderer` consumes tracking and draws the broadcast feed.
-3. `renderer` writes HLS segments to Blob Storage.
-4. `vision` reads frames from Blob Storage.
-5. `vision` publishes detected events (auto-eventing).
-6. `insights` consumes events and detections.
-7. Agents call Foundry models with Entra tokens.
-8. The Historian agent calls League Memory over MCP.
-9. League Memory runs parameterised, read-only SQL.
-10. `insights` publishes verified, timed cues.
-11. `recap` starts at half time and full time.
-12. Recap agents call Foundry and Azure AI Speech (voice timing).
-13. `recap` enqueues one render task per fan profile.
-14. `render-job` scales from 0 to N and writes MP4 files to Blob Storage.
-15. `qa-job` runs speech-to-text and a vision check, then publishes.
-16. `api` streams cues to screens over SSE.
-17. The web app calls `api` (access code, rate limits).
-18. Fans open the web app.
-19. `api` serves films through short-lived SAS links.
+Before kick-off, on the build machine (a batch run of the match pipeline):
+1. `sim` plays the match: events and 10 Hz tracking.
+2. The insights agents (Microsoft Agent Framework) write each moment's line on Foundry gpt-5-mini, with Entra tokens.
+3. The Historian asks League Memory over MCP (read-only, parameterised SQL on five seasons).
+4. Code verifies every number; verified lines and play-by-play calls are voiced by Azure AI Speech.
+5. The match package: tracking feed, verified cues, calls and voices.
+6. Images (Studio bundle, match package, services) are built and pushed to Azure Container Registry.
 
-**Deployment:** GitHub Actions signs in with OIDC (no stored secrets) and deploys Bicep/azd templates, with images from ghcr.io.
+On Azure, in one resource group:
+
+7. The Studio app and the render job pull their images with the managed identity.
+8. Fans open the Studio (access code); `api` streams the verified cues on the match clock (SSE).
+9. A moment, or a fan's "Clip that": `api` puts its slices on the `cuts` queue.
+10. KEDA starts one `render-job` replica per message; each draws its frames with the Studio itself (headless Chromium on CPU).
+11. The QA agent checks each language's film: Azure AI Speech hears it, gpt-5-mini reads its captions, code judges (ADR-0014).
+12. Pieces, films and QA reports land in Blob; the fan's reel shows each moment with its verdict.
+13. At the whistle the Recap Factory queues one message per fan's film; the job makes them side by side and prices each (ADR-0015).
+14. `api` serves films, share pages, poster frames and the QR hand-over from Blob.
+
+**Deployment:** `deploy/deploy.sh` runs Bicep (`infra/main.bicep`): the Container Apps environment, the Studio app, the queue-triggered job, Storage with shared keys off, the registry, the managed identity and its least-privilege roles. Images are built with Docker and pushed with an Entra sign-in; the GitHub release identity uses OIDC federation, so no secret is stored anywhere. The same checks as CI (format, lint, types, tests with an 80 % coverage gate) run before every commit.
 
 ## Principles
-- Code computes every number; AI only explains.
-- Every claim carries evidence: event IDs, history record IDs or camera tracks.
+- Code computes every number and makes every judgement; AI writes, translates and perceives.
+- Every claim carries evidence: event IDs and League Memory records.
 - A plain card airs instantly; the verified AI card replaces it.
-- Event-driven, replayable, scale to zero.
+- Event-driven and replayable: the job scales from zero on its queue; the Studio keeps one warm replica while it is judged.
 - Managed identity everywhere; local (key) auth disabled.
 - Every stage is scored against the simulator's hidden truth.
 
