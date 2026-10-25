@@ -14,6 +14,8 @@
 - **Everything on the screen is read back.** `/factory.html` shows the films as a fans by languages grid, replicas at work over time, time to the first and the last film, cost per film and the QA pass rate, all from the run's blobs; any finished film plays there with its QA report.
 
 ## Consequences
-- Measured locally on 25 Oct: an 80.7 s film took 65 s on one replica (25 s to join and mix, 40 s for the QA agent) and cost US$0.032 at list price (compute US$0.008, QA US$0.024).
+- Measured on Azure on 25 Oct (run f-ff39d73ed74f, 20 replicas): the first of 21 films was ready 54 s after the run started (most of it the replicas starting), all 21 in 158 s; US$0.022 a film at list price (compute US$0.004, QA US$0.018). Locally the same 80.7 s film took 65 s.
+- The first run on Azure flagged all 7 of the away club's films, and rightly: a goal call that does not fit a 6.5 s conceded clip was left out of the clip but voiced in the fan's film, over the next moment's pictures and with no line on screen. Voices and lines now stay inside the clip they start in, so a fan's film says exactly what its clips show; the next run passed 20 of 21 (the last flag: the recogniser heard no words in two short Naija calls).
+- More replicas is not faster here: with 24 allowed, all 21 films started together, Azure Speech throttled the QA agent's checks (it waits them out, so nothing failed) and the run took 236 s at twice the compute per film. The job stays at 20.
 - The match in the demo has two goals and no big chances or great saves (its best miss was 0.13 xG), so its run is 21 films: both clubs and the scorer, in seven languages. The other 35 players get no film rather than an empty one.
 - Replicas are sized for frame rendering (4 vCPU, 8 GiB) and are oversized for joining; a second, smaller job would cut compute cost per film by about three quarters if runs became frequent.
