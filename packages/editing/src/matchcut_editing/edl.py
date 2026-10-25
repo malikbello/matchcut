@@ -401,6 +401,20 @@ def clip_captions(
     return _captions(Cut("", language, "", "", "", segments=list(segments)), cues)
 
 
+def clip_end(cut: Cut, at: float) -> float:
+    """Where the clip playing at film second `at` ends: a fan's film is its clips joined, each
+    rendered once on its own, so nothing voiced or shown may run over a cut into the next one."""
+    start = 0.0
+    spans: list[list[Any]] = []
+    for seg in cut.segments:
+        if spans and spans[-1][2] == seg.clip:
+            spans[-1][1] = start + seg.duration
+        else:
+            spans.append([start, start + seg.duration, seg.clip])
+        start += seg.duration
+    return next((b for a, b, _c in spans if a <= at < b), cut.duration)
+
+
 def call_lines(cut: Cut, calls: list[dict]) -> list[tuple[float, float, str]]:
     """The caller's words on screen while he says them, for films watched muted (as most shared
     video is): each call's line airs where the soundtrack placed its voice, stays a moment after
@@ -417,7 +431,7 @@ def call_lines(cut: Cut, calls: list[dict]) -> list[tuple[float, float, str]]:
         end = max(b + CALL_LINE_TAIL_S, a + MIN_CAPTION_S)
         if k + 1 < len(said):
             end = min(end, said[k + 1][0])
-        end = min([end, cut.duration] + [ca for ca, _cb, _m in cut.captions if ca > a])
+        end = min([end, cut.duration, clip_end(cut, a)] + [ca for ca, _cb, _m in cut.captions if ca > a])
         if end - a >= MIN_CALL_LINE_S:
             out.append((round(a, 3), round(end, 3), text))
     return out
@@ -517,7 +531,9 @@ def _voice_track(
     for t, f, role in sorted(wanted):
         d = clip_durations.get(f, 2.5)
         start = max(t, free_at)
-        if start - t > MAX_VOICE_SHIFT_S or start + d > cut.duration:
+        # a voice stays inside its clip: one that would run over the cut is left out here, as it
+        # is when the clip is cut on its own (otherwise a fan's film says what its clips never show)
+        if start - t > MAX_VOICE_SHIFT_S or start + d > min(cut.duration, clip_end(cut, t)):
             continue
         cut.audio.append(AudioEvent(round(start, 3), f, role, d))
         free_at = start + d + VOICE_GAP_S

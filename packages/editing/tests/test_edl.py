@@ -386,3 +386,28 @@ def test_the_master_is_measured_then_set_with_the_measurement():
     assert second[-1] == "out.m4a"
     assert loudness_report(log.replace("-18.20", "-inf")) is None  # silence: one pass instead
     assert loudness_report("no report") is None
+
+
+def test_no_voice_or_call_line_runs_over_a_cut():
+    """A conceded clip is 6.5 s: the goal call near its end does not fit, so it is left out of the
+    clip; a fan's film joining that clip to the next must leave it out too (it once voiced it over
+    the next moment's pictures, with no line on screen, and the QA agent flagged every away film)."""
+    from matchcut_editing.edl import AudioEvent, Cut, Segment, _voice_track, call_lines, clip_end  # noqa: PLC0415
+
+    cut = Cut("kes-wcr-7", "en", "9x16", "x", "KES v WCR")
+    cut.segments = [
+        Segment("live", 3.5, t0=0, clip="conceded-1"),
+        Segment("live", 3.0, t0=3500, clip="conceded-1"),
+        Segment("live", 6.5, t0=20000, clip="conceded-2"),
+    ]
+    assert clip_end(cut, 1.0) == 6.5
+    assert clip_end(cut, 6.5) == 13.0
+    calls = [
+        {"audio": "early.mp3", "t_ms": 1000, "text": "Here's Quinouani..."},
+        {"audio": "late.mp3", "t_ms": 5000, "text": "Quinouani! What a finish!"},
+    ]
+    _voice_track(cut, [], [(0.0, 6.5, 0, 6500)], [], calls, {"early.mp3": 1.9, "late.mp3": 1.9})
+    assert [e.file for e in cut.audio] == ["early.mp3"]  # 5.0 + 1.9 s would cross the cut at 6.5 s
+    cut.audio.append(AudioEvent(5.9, "edge.mp3", "call", 0.5))
+    lines = call_lines(cut, [*calls, {"audio": "edge.mp3", "text": "In!"}])
+    assert all(end <= 6.5 for a, end, _t in lines if a < 6.5)
