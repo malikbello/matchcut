@@ -93,8 +93,11 @@ class Perception:
             self.client = httpx.Client(timeout=120)
         return self.client
 
-    def listen(self, film: Path, language: str) -> list[tuple[float, float, str]]:
-        """What is said in the film, as (start s, end s, text) phrases."""
+    def listen(
+        self, film: Path, language: str, usage: dict[str, float] | None = None
+    ) -> list[tuple[float, float, str]]:
+        """What is said in the film, as (start s, end s, text) phrases. `usage` counts the audio
+        seconds sent (what Speech bills)."""
         with tempfile.TemporaryDirectory() as tmp:
             wav = Path(tmp) / "sound.wav"
             _run(
@@ -113,6 +116,8 @@ class Perception:
                     str(wav),
                 ]
             )
+            if usage is not None:  # 16 kHz mono 16-bit after a 44-byte header
+                usage["audio_s"] = usage.get("audio_s", 0) + max(0, wav.stat().st_size - 44) / 32000
             definition = json.dumps({"locales": [LOCALES.get(language, "en-GB")]})
             r = self.http.post(
                 self.endpoint + STT_PATH,
@@ -132,8 +137,10 @@ class Perception:
             for p in r.json().get("phrases", [])
         ]
 
-    def read(self, film: Path, seconds: list[float]) -> dict[float, str]:
-        """Every word on screen at each of these film seconds."""
+    def read(
+        self, film: Path, seconds: list[float], usage: dict[str, float] | None = None
+    ) -> dict[float, str]:
+        """Every word on screen at each of these film seconds. `usage` counts the model's tokens."""
         out: dict[float, str] = {}
         with tempfile.TemporaryDirectory() as tmp:
             for s in sorted(set(seconds)):
@@ -175,7 +182,12 @@ class Perception:
                     },
                 )
                 r.raise_for_status()
-                out[s] = r.json()["choices"][0]["message"].get("content") or ""
+                body = r.json()
+                if usage is not None:
+                    used = body.get("usage") or {}
+                    usage["tokens_in"] = usage.get("tokens_in", 0) + used.get("prompt_tokens", 0)
+                    usage["tokens_out"] = usage.get("tokens_out", 0) + used.get("completion_tokens", 0)
+                out[s] = body["choices"][0]["message"].get("content") or ""
         return out
 
 
@@ -187,12 +199,14 @@ def qa_film(
     language: str,
     senses: Perception,
     names: list[str] | None = None,
+    usage: dict[str, float] | None = None,
 ) -> QAReport:
-    """Listen to the film, read its captions, measure its level, and judge it against its plan."""
+    """Listen to the film, read its captions, measure its level, and judge it against its plan.
+    `usage` counts what the agent's senses used (audio seconds, tokens), for the film's cost."""
     names = names or []
     spoken, shown = expectations(cut, cues, calls)
-    transcript = senses.listen(film, language) if spoken else []
-    reads = senses.read(film, [s.middle for s in shown]) if shown else {}
+    transcript = senses.listen(film, language, usage) if spoken else []
+    reads = senses.read(film, [s.middle for s in shown], usage) if shown else {}
     return judge(film.name, language, spoken, shown, transcript, reads, loudness(film, senses.ffmpeg), names)
 
 

@@ -14,6 +14,9 @@ publishes the film. Every Azure call uses the job's managed identity: no keys an
              cuts/<id>/claim-03 (a slice started), cuts/<id>/part-03.mp4 (a slice rendered),
              cuts/<id>/watch-03 (a finished replica watching a late slice),
              cuts/<id>/assemble (the assembler's claim)
+
+A Recap Factory run (matchcut_editing.factory) puts one "fan" message per fan's film on the same
+queue: the replica joins that film from the pieces, has the QA agent check it, and records it.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ from typing import Any
 QUEUE = "cuts"
 CONTAINER = "cuts"
 SCRATCH = Path("/tmp/cuts")  # noqa: S108 - the job's own scratch space
+BOOT = time.time()  # the replica's start: what it is billed from
 HEDGE = 1.3  # back up a slice once it runs this many times longer than the watcher's own slice
 TAIL_SHARE = 5  # watch only when at most a fifth of the slices (and at least one) are missing
 
@@ -331,6 +335,76 @@ def render_card_set(blobs: Any, req: dict[str, Any]) -> None:
             blobs.upload_blob(piece_blob(match, aspect, f"{name}.mp4"), f, overwrite=True)
 
 
+def _json(blobs: Any, name: str, value: dict[str, Any]) -> None:
+    blobs.upload_blob(name, json.dumps(value, ensure_ascii=False).encode(), overwrite=True)
+
+
+def render_fan(blobs: Any, req: dict[str, Any], senses: Any = None, data: Path | None = None) -> None:
+    """One fan's film for a Recap Factory run: joined from the match's pieces, its soundtrack
+    mixed in their language, checked by the QA agent, and its time and cost recorded."""
+    from matchcut_editing.assembly import assemble_cut, fan_cut, piece_files  # noqa: PLC0415
+    from matchcut_editing.factory import cost, root  # noqa: PLC0415
+    from matchcut_editing.inputs import load  # noqa: PLC0415
+    from matchcut_editing.qa import summary  # noqa: PLC0415
+
+    from matchcut_recap.qa_agent import league_names, qa_film  # noqa: PLC0415
+
+    match, aspect, lang, focus = req["match"], req["aspect"], req["lang"], req["focus"]
+    base = f"{root(match, aspect)}{req['run']}/{req['film']}"
+    data = data or Path(os.environ.get("MATCHCUT_DATA", "/app/out"))
+    started = time.time()
+    _json(blobs, f"{base}.json", {"status": "making", "started": started})
+    work = SCRATCH / req["run"] / req["film"]
+    work.mkdir(parents=True, exist_ok=True)
+    manifest = json.loads(blobs.download_blob(piece_blob(match, aspect, "manifest.json")).readall())
+    cut = fan_cut(data, match, focus, lang, aspect, manifest)
+    pieces = []
+    for name in piece_files(cut):
+        local = work / name
+        with local.open("wb") as f:
+            blobs.download_blob(piece_blob(match, aspect, name)).readinto(f)
+        pieces.append(local)
+    film = assemble_cut(cut, pieces, data / "media", CROWD, work / "out")
+    made = time.time()
+    usage: dict[str, float] = {}
+    if senses is None:
+        report = {"passed": False, "error": "no QA agent on this replica"}
+    else:
+        try:
+            inp = load(data, match, lang)
+            report = qa_film(
+                film, cut, inp.cues, inp.calls, lang, senses, league_names(inp.feed), usage
+            ).as_dict()
+        except Exception as exc:  # perception down is a flagged film, not a lost one
+            report = {"passed": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
+    with film.open("rb") as f:
+        blobs.upload_blob(f"{base}.mp4", f, overwrite=True)
+    _json(blobs, f"{base}.qa.json", report)
+    finished = time.time()
+    vcpu = float(os.environ.get("MATCHCUT_REPLICA_VCPU", "4"))
+    gib = float(os.environ.get("MATCHCUT_REPLICA_GIB", "8"))
+    _json(
+        blobs,
+        f"{base}.json",
+        {
+            "status": "done",
+            "started": started,
+            "finished": finished,
+            "seconds": round(finished - started, 1),
+            "made_s": round(made - started, 1),
+            "checked_s": round(finished - made, 1),
+            "duration": round(cut.duration, 1),
+            "size": film.stat().st_size,
+            "usage": {k: round(v, 1) for k, v in usage.items()},
+            "cost": cost(finished - BOOT, vcpu, gib, usage),
+            "qa": summary(report),
+        },
+    )
+
+
+STUDIO_KINDS = {"cut", "clip", "cards"}  # what renders frames needs the Studio running alongside
+
+
 def main() -> None:
     from azure.identity import DefaultAzureCredential  # noqa: PLC0415
     from azure.storage.blob import BlobServiceClient  # noqa: PLC0415
@@ -347,11 +421,21 @@ def main() -> None:
         return
     req = json.loads(msg.content)
     SCRATCH.mkdir(parents=True, exist_ok=True)
+    kind = req.get("kind", "cut")
+    if kind == "fan":
+        try:
+            render_fan(blobs, req, _senses())
+        except Exception as exc:
+            name = f"factory/{req['match']}/{req['aspect']}/{req['run']}/{req['film']}.json"
+            _json(blobs, name, {"status": "failed", "error": f"{type(exc).__name__}: {exc}"[:300]})
+            raise
+        finally:
+            queue.delete_message(msg)  # a film is made once: a failure is shown, not retried
+        return
     code = secrets.token_urlsafe(24)
     api = _start_api(code)
     try:
         os.environ["MATCHCUT_RENDER_CODE"] = code
-        kind = req.get("kind", "cut")
         {"cut": render_slice, "clip": render_clip, "cards": render_card_set}[kind](blobs, req)
         queue.delete_message(msg)
     except Exception as exc:

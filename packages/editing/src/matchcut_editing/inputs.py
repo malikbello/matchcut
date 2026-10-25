@@ -52,7 +52,11 @@ _DURATIONS: dict[tuple[Path, float], float] = {}
 
 def read_feed(data: Path, match: str) -> dict:
     """The match's tracking feed, decompressed once per file version (callers only read it)."""
-    path = data / "feeds" / f"{match}.json.gz"
+    return load_feed(data / "feeds" / f"{match}.json.gz")
+
+
+def load_feed(path: Path) -> dict:
+    """A tracking feed file, decompressed once per file version (callers only read it)."""
     mtime = path.stat().st_mtime
     hit = _FEEDS.get(path)
     if hit is None or hit[0] != mtime:

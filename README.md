@@ -45,7 +45,8 @@ uv run matchcut-insights eval --matches 2 --judges             # scorecard + Azu
 ```bash
 export MATCHCUT_ACCESS_CODE_SHA256=$(printf '%s' 'choose-a-code' | sha256sum | cut -d' ' -f1)
 export MATCHCUT_INSECURE_COOKIE=1   # local http only
-uv run matchcut-api                 # http://127.0.0.1:8080
+uv run matchcut-api                 # http://127.0.0.1:8080 (the Recap Factory: /factory.html)
+uv run matchcut-recap qa --match kes-wcr-7 --langs en,ar   # the QA agent: listen to and read each clip's film
 ```
 
 The same seed always produces the same match. Reports: [realism](reports/realism.md) · [tactical detection](reports/tactical-detection.md) · [insights agents](reports/insights-eval.md) · [Verifier red team](reports/verifier-redteam.md).
