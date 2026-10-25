@@ -813,8 +813,14 @@ function reelItem(m) {
   return li;
 }
 
-// what the QA agent found, in a line: "Heard 3/3 lines, read 2/2 captions, -15.9 LUFS"
-const qaText = (q) => `${q.words ? "Heard" : "Voiced"} ${q.heard} lines, read ${q.read} captions, ${q.lufs ?? "?"} LUFS`;
+// what the QA agent found, in a line: "Heard 2/2 lines, voiced 1/1, read 2/2 captions, -15.9 LUFS"
+// (voiced: checked for voice only, as Naija lines and lines of a name and a word or two are)
+const qaLines = (q) => {
+  const heard = q.heard && !q.heard.endsWith("/0") ? `heard ${q.heard}` : "";
+  const parts = [heard, q.voiced ? `voiced ${q.voiced}` : ""].filter(Boolean).join(", ") || "no";
+  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines`;
+};
+const qaText = (q) => `${qaLines(q)}, read ${q.read} captions, ${q.lufs ?? "?"} LUFS`;
 
 function openMoment(m) {
   reel.open = m;

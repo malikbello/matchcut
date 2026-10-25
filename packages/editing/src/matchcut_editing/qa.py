@@ -185,12 +185,15 @@ def judge(
 
 
 def summary(report: dict[str, Any]) -> dict[str, Any]:
-    """A QA report in brief, for a fan's screen: lines heard, captions read, the level, and
-    whether the lines were checked word by word (or, with no recogniser, for voice only)."""
+    """A QA report in brief, for a fan's screen: lines heard word for word, lines checked for
+    voice only (Naija, and lines of a name and a word or two), captions read and the level."""
     lines, caps = report.get("lines", []), report.get("captions", [])
+    worded = [x for x in lines if x.get("check") != "voiced"]
+    voiced = [x for x in lines if x.get("check") == "voiced"]
     return {
         "passed": bool(report.get("passed")),
-        "heard": f"{sum(1 for x in lines if x.get('heard'))}/{len(lines)}",
+        "heard": f"{sum(1 for x in worded if x.get('heard'))}/{len(worded)}",
+        "voiced": f"{sum(1 for x in voiced if x.get('heard'))}/{len(voiced)}" if voiced else None,
         "read": f"{sum(1 for x in caps if x.get('read'))}/{len(caps)}",
         "lufs": report.get("lufs"),
         "words": not any(x.get("check") == "voiced" for x in lines),
