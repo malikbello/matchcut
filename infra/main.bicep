@@ -289,7 +289,9 @@ resource recap 'Microsoft.App/jobs@2025-01-01' = if (deployApps) {
         replicaCompletionCount: 1
         scale: {
           minExecutions: 0
-          maxExecutions: 20 // two films at once: 10 slices each, 4 vCPU per slice, within 100 cores
+          // 24 replicas x 4 vCPU = 96 cores, with the Studio's 2 within the environment's 100:
+          // every fan's film of a Recap Factory run (21 for the demo match) is made at once
+          maxExecutions: 24
           pollingInterval: 15
           rules: [
             {
