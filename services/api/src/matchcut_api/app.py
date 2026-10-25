@@ -54,6 +54,7 @@ from matchcut_api.cuts import (
     Film,
     LocalCuts,
 )
+from matchcut_api.factory import BusyError, DiskBlobs, Factory, LocalRunner, RationedError
 from matchcut_api.reel import MAX_WINDOW_MS, BlobPieces, LocalPieces, Reel
 
 MATCH_ID = re.compile(r"^[a-z]{3}-[a-z]{3}-\d{1,6}$")
@@ -92,6 +93,8 @@ class Settings:
     cuts_per_hour: int = 6
     cut_chunks: int = 10  # slices rendered in parallel per cut on Azure
     proxy_hops: int = 0  # reverse proxies in front of the app (1 behind the Container Apps ingress)
+    factory_cooldown_s: int = 1800  # Recap Factory runs cost Azure credit: one per half hour
+    factory_runs_per_day: int = 6
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -114,6 +117,8 @@ class Settings:
             port=int(os.environ.get("PORT", "8080")),
             cut_chunks=int(os.environ.get("MATCHCUT_CUT_CHUNKS", "10")),
             proxy_hops=int(os.environ.get("MATCHCUT_PROXY_HOPS", "0")),
+            factory_cooldown_s=int(os.environ.get("MATCHCUT_FACTORY_COOLDOWN_S", "1800")),
+            factory_runs_per_day=int(os.environ.get("MATCHCUT_FACTORY_RUNS_PER_DAY", "6")),
         )
 
 
@@ -182,6 +187,10 @@ class ClipBody(BaseModel):
     start: int = Field(ge=0, le=20_000_000)  # match ms
     end: int = Field(ge=0, le=20_000_000)
     aspect: str = Field(default="9x16", max_length=5)
+
+
+class FactoryBody(BaseModel):
+    aspect: str = "9x16"
 
 
 class ShareBody(BaseModel):
@@ -416,6 +425,14 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
         feed = json.loads(gzip.decompress(path.read_bytes()))
         return {p["name"] for p in feed.get("players", {}).values()}
 
+    def featured(match_id: str, focus: dict[str, str]) -> bool:
+        """A focus with a story: a club, or a player with a moment of their own (else no film)."""
+        from matchcut_editing.edl import featured_focuses  # noqa: PLC0415
+        from matchcut_editing.inputs import best_cues, load_feed  # noqa: PLC0415
+
+        feed = load_feed(s.feeds_dir / f"{match_id}.json.gz")
+        return bool(featured_focuses(feed, best_cues(s.cues_dir / f"{match_id}.jsonl", "en"), [focus]))
+
     @app.post("/api/cuts", dependencies=[Depends(require_session)])
     def make_cut(body: CutBody, request: Request) -> dict[str, str]:
         """Ask for a personal highlight film: a club (side) or a player, a language, an aspect."""
@@ -427,6 +444,8 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
             raise HTTPException(422, "choose a side or a player")
         if body.player and body.player not in players_of(body.match):
             raise HTTPException(422, "unknown player")
+        if body.player and not featured(body.match, {"player": body.player}):
+            raise HTTPException(422, f"{body.player} has no moments in this match")
         if not limiter.hit(per_hour, f"cuts:{client_id(request)}"):
             raise HTTPException(429, "too many cuts for now")
         cut_id = store.submit(CutRequest(body.match, body.lang, body.aspect, body.side, body.player))
@@ -570,6 +589,85 @@ def create_app(settings: Settings | None = None, cuts: CutStore | None = None) -
         if found is None:
             raise HTTPException(404, "not found")
         return Response(share_page(public_base(request), token, found), media_type="text/html; charset=utf-8")
+
+    # ---------------------------------------------------------------- the Recap Factory
+    factory = (
+        Factory(store.blobs, store.queue, s.factory_cooldown_s, s.factory_runs_per_day)
+        if isinstance(store, AzureCuts)
+        else Factory(DiskBlobs(s.data_dir), LocalRunner(DiskBlobs(s.data_dir), s.data_dir), 0, 1000)
+    )
+
+    def factory_plan(match_id: str) -> tuple[list[dict], dict[str, int]]:
+        """Every film the match's fans can ask for, labelled for the screen, and the moment clips
+        they are joined from (each rendered once, during the match)."""
+        from matchcut_editing.edl import featured_focuses, pick_moments  # noqa: PLC0415
+        from matchcut_editing.factory import plan  # noqa: PLC0415
+        from matchcut_editing.inputs import VOICED, best_cues, focuses, load_feed  # noqa: PLC0415
+
+        feed = load_feed(s.feeds_dir / f"{match_id}.json.gz")
+        cues = best_cues(s.cues_dir / f"{match_id}.jsonl", "en")
+        chosen = featured_focuses(feed, cues, focuses(feed))
+        teams = feed["teams"]
+        side_of = {teams[side]["id"]: side for side in ("home", "away")}
+        side_by_name = {p["name"]: side for side in ("home", "away") for p in teams[side]["players"].values()}
+        for c in feed.get("changes", []):  # substitutes join their side's list
+            if c.get("id") in feed["players"]:
+                side_by_name[feed["players"][c["id"]]["name"]] = side_of.get(feed["slots"][c["slot"]], "home")
+        films = []
+        for f in plan(chosen, [lang for lang in VOICED if lang in CUT_LANGUAGES]):
+            side = f["focus"].get("side") or side_by_name.get(f["focus"]["player"], "home")
+            label = f["focus"].get("player") or teams[side]["name"]
+            films.append(
+                {**f, "label": label, "team": teams[side]["code"], "kit": teams[side]["kit"]["primary"]}
+            )
+        moments = {f"{p['kind']}-{p['t']}" for c in chosen for p in pick_moments(feed, cues, c)}
+        return films, {
+            "moments": len(moments),
+            "focuses": len(chosen),
+            "players": len(feed.get("players", {})),
+        }
+
+    @app.get("/api/matches/{match_id}/factory", dependencies=[Depends(require_session)])
+    def factory_state(match_id: str, aspect: str = "9x16") -> dict:
+        """The latest Recap Factory run (films, replicas, timings, cost, QA), or the plan of one."""
+        if not MATCH_ID.match(match_id) or not REEL_ASPECT.match(aspect) or not players_of(match_id):
+            raise HTTPException(422, "invalid request")
+        st = factory.state(match_id, aspect)
+        if st is None:
+            films, pieces = factory_plan(match_id)
+            return {"run": None, "films": films, "pieces": pieces, "total": len(films), "next_run_in": 0}
+        return st
+
+    @app.post("/api/matches/{match_id}/factory", dependencies=[Depends(require_session)])
+    def factory_run(match_id: str, body: FactoryBody) -> dict:
+        """Make every fan's film now: one render job replica per film, side by side."""
+        if not MATCH_ID.match(match_id) or not REEL_ASPECT.match(body.aspect) or not players_of(match_id):
+            raise HTTPException(422, "invalid request")
+        films, pieces = factory_plan(match_id)
+        try:
+            return factory.start(match_id, body.aspect, films, pieces)
+        except BusyError:
+            raise HTTPException(409, "a run is still making its films") from None
+        except RationedError as r:
+            if r.seconds is None:
+                raise HTTPException(429, "no more runs today") from None
+            wait = max(1, round(r.seconds))
+            raise HTTPException(429, f"next run in {wait} s", headers={"Retry-After": str(wait)}) from None
+
+    @app.get("/media/factory/{match_id}/{aspect}/{run}/{film}.mp4", dependencies=[Depends(require_session)])
+    def factory_film(match_id: str, aspect: str, run: str, film: str, request: Request) -> StreamingResponse:
+        from matchcut_editing.factory import FILM_ID, RUN_ID  # noqa: PLC0415
+
+        ok = (
+            MATCH_ID.match(match_id)
+            and REEL_ASPECT.match(aspect)
+            and RUN_ID.match(run)
+            and FILM_ID.match(film)
+        )
+        made = factory.film(match_id, aspect, run, film) if ok else None
+        if made is None:
+            raise HTTPException(404, "not found")
+        return film_response(made, request)
 
     @app.get("/media/{match_id}/clip.mp4", dependencies=[Depends(require_session)])
     def media(match_id: str) -> FileResponse:

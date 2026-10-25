@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from matchcut_api import Settings, create_app
 from matchcut_api.app import qr_svg, sha256
 from matchcut_api.cuts import CutRequest, Film, LocalCuts, progress
+from matchcut_api.factory import DiskBlobs, Factory
 from matchcut_api.reel import LocalPieces, Reel, moment_caption
 from matchcut_contracts import Cue, CueStatus, MomentKind
 
@@ -199,8 +200,7 @@ class FakeCuts:
 
 @pytest.fixture
 def cuts_client(settings):
-    players = b'{"match_id": "kes-wcr-7", "t": [0], "players": {"p00001": {"num": 9, "name": "Quinouani"}}}'
-    (settings.feeds_dir / f"{MATCH}.json.gz").write_bytes(gzip.compress(players))
+    (settings.feeds_dir / f"{MATCH}.json.gz").write_bytes(gzip.compress(json.dumps(FEED).encode()))
     store = FakeCuts()
     return TestClient(create_app(settings, cuts=store)), store
 
@@ -477,5 +477,108 @@ def test_a_moment_carries_the_qa_agents_verdict(tmp_path):
         "read": "1/1",
         "lufs": -15.9,
         "words": True,
+        "issues": [],
     }
     assert reel.qa(MATCH, "9x16", "goal-1", "fr") is None  # not checked yet
+
+
+FEED = {
+    "match_id": MATCH,
+    "t": [0],
+    "slots": ["kes", "wcr"],
+    "players": {"p1": {"num": 9, "name": "Quinouani"}, "p2": {"num": 4, "name": "Toredor"}},
+    "teams": {
+        "home": {"id": "kes", "code": "KES", "name": "Kestrel Bay FC", "kit": {"primary": "#E8B422"},
+                 "players": {"0": {"id": "p1", "num": 9, "name": "Quinouani"}}},
+        "away": {"id": "wcr", "code": "WCR", "name": "Westcroft United", "kit": {"primary": "#6CC8FF"},
+                 "players": {"1": {"id": "p2", "num": 4, "name": "Toredor"}}},
+    },
+    "goals": [{"t": 60_000, "side": "home"}],
+    "events": [[60_000, "goal", 0]],
+    "changes": [],
+}  # fmt: skip
+
+
+class FakeQueue:
+    def __init__(self):
+        self.messages = []
+
+    def send_message(self, content):
+        self.messages.append(json.loads(content))
+
+
+@pytest.fixture
+def factory_client(settings, tmp_path, monkeypatch):
+    (settings.feeds_dir / f"{MATCH}.json.gz").write_bytes(gzip.compress(json.dumps(FEED).encode()))
+    queue = FakeQueue()
+    clock = [1_000_000.0]
+    made = Factory(
+        DiskBlobs(tmp_path / "blobs"), queue, cooldown_s=600, runs_per_day=2, clock=lambda: clock[0]
+    )
+    monkeypatch.setattr("matchcut_api.app.Factory", lambda *a, **k: made)
+    settings.data_dir = tmp_path
+    client = TestClient(create_app(settings))
+    _login(client)
+    return client, queue, made, clock
+
+
+def test_the_factory_plans_every_fans_film_then_runs_them_all_at_once(factory_client):
+    client, queue, made, clock = factory_client
+    url = f"/api/matches/{MATCH}/factory"
+    plan = client.get(url).json()
+    assert plan["run"] is None
+    assert plan["total"] == 3 * 7
+    assert {f["label"] for f in plan["films"]} == {"Kestrel Bay FC", "Westcroft United", "Quinouani"}
+    assert plan["pieces"] == {"moments": 2, "focuses": 3, "players": 2}  # a goal, and the same goal conceded
+    started = client.post(url, json={"aspect": "9x16"}).json()
+    assert started["run"].startswith("f-")
+    assert started["counts"]["waiting"] == 21
+    assert len(queue.messages) == 21
+    assert {m["kind"] for m in queue.messages} == {"fan"}
+    assert client.post(url, json={"aspect": "9x16"}).status_code == 409  # still making its films
+    # every film made: the run ends, and the next is rationed by the cooldown, then by the day's cap
+    prefix = f"factory/{MATCH}/9x16/{started['run']}/"
+    for m in queue.messages:
+        body = {"status": "done", "started": clock[0] + 5, "finished": clock[0] + 60,
+                "cost": {"compute": 0.008, "qa": 0.024, "total": 0.032}, "qa": {"passed": True}}  # fmt: skip
+        made.blobs.upload_blob(prefix + m["film"] + ".json", json.dumps(body).encode(), overwrite=True)
+    clock[0] += 120
+    st = client.get(url).json()
+    assert st["finished"]
+    assert st["qa_passed"] == "21/21"
+    assert st["first_film_s"] == 60
+    refused = client.post(url, json={"aspect": "9x16"})
+    assert refused.status_code == 429
+    assert int(refused.headers["retry-after"]) == 480
+    clock[0] += 600
+    assert client.post(url, json={"aspect": "9x16"}).status_code == 200
+    assert client.get(url).json()["run"] != started["run"]
+
+
+def test_factory_films_are_served_by_strict_name_only(factory_client):
+    client, _, made, _ = factory_client
+    name = f"factory/{MATCH}/9x16/f-0123456789ab/home.en.mp4"
+    made.blobs.upload_blob(name, b"\x00" * 100)
+    base = f"/media/factory/{MATCH}/9x16"
+    r = client.get(f"{base}/f-0123456789ab/home.en.mp4", headers={"Range": "bytes=0-9"})
+    assert r.status_code == 206
+    assert len(r.content) == 10
+    for bad in (
+        "f-0123456789ab/..%2Fhome.en.mp4",
+        "x-0123456789ab/home.en.mp4",
+        "f-0123456789ab/home.xx.en.mp4",
+    ):
+        assert client.get(f"{base}/{bad}").status_code == 404
+
+
+def test_a_cut_for_a_player_with_no_moments_is_refused(settings):
+    (settings.feeds_dir / f"{MATCH}.json.gz").write_bytes(gzip.compress(json.dumps(FEED).encode()))
+    store = FakeCuts()
+    client = TestClient(create_app(settings, cuts=store))
+    _login(client)
+    body = {"match": MATCH, "lang": "en", "aspect": "9x16"}
+    r = client.post("/api/cuts", json={**body, "player": "Toredor"})
+    assert r.status_code == 422
+    assert "no moments" in r.json()["detail"]
+    assert client.post("/api/cuts", json={**body, "player": "Quinouani"}).status_code == 200
+    assert [req.player for req in store.requests] == ["Quinouani"]

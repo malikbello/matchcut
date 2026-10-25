@@ -184,6 +184,13 @@ def pick_moments(feed: dict, cues: list[dict], focus: dict[str, str]) -> list[di
     return picks
 
 
+def featured_focuses(feed: dict, cues: list[dict], focuses: list[dict[str, str]]) -> list[dict[str, str]]:
+    """The focuses with a story in this match: either club always (a club's fans see the goals
+    against too), and each player with at least one moment of their own. A player with none
+    gets no film, rather than a title card and an end card."""
+    return [f for f in focuses if "side" in f or pick_moments(feed, cues, f)]
+
+
 def _fit(picks: list[dict], package: dict[int, float]) -> list[dict]:
     """Keep every goal; drop the earliest chances until the film fits."""
 

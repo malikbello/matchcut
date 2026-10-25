@@ -26,9 +26,16 @@ param githubRepo string = 'malikbello@139644523/matchcut@1423646206'
 param deployerPrincipalIds array = []
 @description('Deploy the apps (false on the first run, before images exist)')
 param deployApps bool = true
+@description('Studio replicas kept warm (1 while the app is being judged, so no visitor waits for a cold start; 0 scales to zero when idle)')
+@minValue(0)
+@maxValue(2)
+param studioMinReplicas int = 0
 
 var suffix = uniqueString(resourceGroup().id)
 var tags = { project: 'matchcut', purpose: 'inside-the-game-hackathon' }
+// one render replica: the job is sized here and told its size (each film's cost is priced from it)
+var recapCpu = 4
+var recapMemoryGi = 8
 
 // ---------------------------------------------------------------- observability
 resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
@@ -258,7 +265,7 @@ resource studio 'Microsoft.App/containerApps@2025-01-01' = if (deployApps) {
           ]
         }
       ]
-      scale: { minReplicas: 0, maxReplicas: 2, rules: [ { name: 'http', http: { metadata: { concurrentRequests: '40' } } } ] }
+      scale: { minReplicas: studioMinReplicas, maxReplicas: 2, rules: [ { name: 'http', http: { metadata: { concurrentRequests: '40' } } } ] }
     }
   }
   dependsOn: [ pull ]
@@ -300,8 +307,12 @@ resource recap 'Microsoft.App/jobs@2025-01-01' = if (deployApps) {
         {
           name: 'recap'
           image: '${registry.properties.loginServer}/matchcut-recap:${recapImageTag}'
-          resources: { cpu: json('4'), memory: '8Gi' }
-          env: concat(commonEnv, [ { name: 'MATCHCUT_FPS', value: '25' } ])
+          resources: { cpu: json(string(recapCpu)), memory: '${recapMemoryGi}Gi' }
+          env: concat(commonEnv, [
+            { name: 'MATCHCUT_FPS', value: '25' }
+            { name: 'MATCHCUT_REPLICA_VCPU', value: string(recapCpu) }
+            { name: 'MATCHCUT_REPLICA_GIB', value: string(recapMemoryGi) }
+          ])
         }
       ]
     }
