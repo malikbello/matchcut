@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 25 Oct 2026 · **Phase:** D2 and D3 done, releasing eaf5514; E (demo and submission) waits for Malik. Branch `d5/fan-cuts` (PR #10, Malik merges)
+**Updated:** Sun 25 Oct 2026, night · **Phase:** D2 and D3 done and live (773cda4); E (demo and submission) waits for Malik. Branch `d5/fan-cuts` (PR #10, Malik merges)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -14,6 +14,13 @@
   - Agent-based match engine: 10 Hz tracking, offside line, low block, pressing, tackles, fouls, cards, substitutions, set pieces, hidden tactical change, true shot probabilities.
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
+
+## Resume here (handoff, 25 Oct, night)
+- **Live on Azure: 773cda4** (Studio revision 11, job on 773cda4, 20 replicas at most, one warm Studio replica). Recap Factory measured on Azure: 21 films, first 54 to 59 s after the run starts, all in about 160 s, US$0.022 a film at list price, 20 of 21 pass QA (the one flag: two short Naija calls the recogniser heard no words in). Moment clips: 27 of 28 pass (the flag: the Nigerian English "is in on goal" heard as "Izinango").
+- **Fixed today because the QA agent caught them on Azure:** loudness on short clips (two-pass master), throttling (retries with Retry-After and jitter), a fan's film voicing a call its clip never shows (voices and call lines now stay inside their clip), names split into words on short lines (voice check under 3 words), Portuguese recogniser capacity (alternate pt-PT and pt-BR; "not checked yet" instead of "flagged").
+- **Tested and reverted:** 24 replicas (all 21 films at once) made Azure Speech throttle the QA checks; 236 s against 158 s. The job stays at 20.
+- **Docs:** architecture v2.0 as built (diagram, flow, principles), concept diagram v2 with measured figures, ADR-0014 (QA agent), ADR-0015 (Recap Factory, with the Azure runs).
+- **Next: E (demo video under 2 minutes, submission text, testing instructions with the access code, repo public), waiting for Malik.** The Factory allows 6 runs a day (UTC) with 30 minutes between runs; plan the demo recording around that.
 
 ## Resume here (handoff, 25 Oct)
 - **D2 QA agent, done:** every moment film is mixed per language on the render job and checked there (Azure AI Speech hears it, gpt-5-mini reads its captions, ffmpeg measures loudness; code judges): `{key}.{lang}.qa.json` beside each film; the reel shows Checked or Flagged with what failed. ADR-0014. The listening window now follows each line's voice length (a fixed 6 s window marked the tail of a 10 s line unheard).
