@@ -1,5 +1,5 @@
 from matchcut_editing.edl import AudioEvent, Cut, Segment
-from matchcut_editing.qa import Shown, Spoken, expectations, judge, recall, words
+from matchcut_editing.qa import Shown, Spoken, expectations, judge, recall, summary, words
 
 
 def test_words_fold_case_accents_and_punctuation_in_any_script():
@@ -73,3 +73,38 @@ def test_a_language_without_a_recogniser_is_checked_for_being_voiced_and_says_so
     assert voiced.lines[0]["check"] == "voiced"
     silent = judge("f", "pcm", spoken, [], [], {}, -16.0)
     assert not silent.passed  # nothing was said where the plan puts the call
+
+
+def test_a_long_line_is_heard_to_its_end():
+    """A ten-second line spills past a fixed listening window: its tail must still count."""
+    line = (
+        "his ninth of the season his second tonight came in the 74th minute "
+        "a chance that goes in once in every nine"
+    )
+    spoken = [Spoken(56.0, line, "line", 9.8)]
+    transcript = [
+        (56.2, 62.0, "his ninth of the season, his second tonight, came in the 74th minute."),
+        (62.6, 65.9, "A chance that goes in once in every nine."),
+    ]
+    report = judge("f.mp4", "en", spoken, [], transcript, {}, -16.0)
+    assert report.lines[0]["heard"]
+    assert report.lines[0]["recall"] == 1.0
+    assert Spoken(1.0, "x", "call").until == 7.0  # length unknown: the fixed window
+
+
+def test_a_summary_says_what_failed_in_film_order():
+    report = {
+        "passed": False,
+        "lufs": -21.0,
+        "lines": [{"at": 30.0, "text": "late line", "heard": False}, {"at": 5.0, "heard": True}],
+        "captions": [{"at": 12.0, "text": "a stale caption", "read": False}],
+    }
+    brief = summary(report)
+    assert brief["heard"] == "1/2"
+    assert brief["read"] == "0/1"
+    assert [(i["kind"], i["at"]) for i in brief["issues"]] == [
+        ("not read", 12.0),
+        ("not heard", 30.0),
+        ("level", None),
+    ]
+    assert summary({"passed": True, "lufs": -16.0})["issues"] == []

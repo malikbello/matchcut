@@ -207,6 +207,8 @@ class Reel:
     def qa(self, match: str, aspect: str, key: str, lang: str) -> dict[str, Any] | None:
         """The QA agent's verdict on a moment's film in one language, in brief (None until it has
         checked it): lines heard, captions read, the level. Remembered for a minute."""
+        from matchcut_editing.qa import summary as qa_summary  # noqa: PLC0415
+
         name = f"{key}.{lang}.qa.json"
         held = self._qa.get(name)
         if held and time.monotonic() - held[0] < QA_TTL_S:
@@ -219,14 +221,7 @@ class Reel:
             except (OSError, ValueError):
                 r = None
             if isinstance(r, dict):
-                lines, caps = r.get("lines", []), r.get("captions", [])
-                summary = {
-                    "passed": bool(r.get("passed")),
-                    "heard": f"{sum(1 for x in lines if x.get('heard'))}/{len(lines)}",
-                    "read": f"{sum(1 for x in caps if x.get('read'))}/{len(caps)}",
-                    "lufs": r.get("lufs"),
-                    "words": not any(x.get("check") == "voiced" for x in lines),
-                }
+                summary = qa_summary(r)
         self._qa[name] = (time.monotonic(), summary)
         return summary
 
