@@ -1,3 +1,6 @@
+import shutil
+import subprocess
+
 import httpx
 import pytest
 from matchcut_recap.qa_agent import RETRIES, Perception
@@ -63,3 +66,22 @@ def test_an_exhausted_recogniser_hands_over_to_the_next_for_the_same_language():
 
     assert senses._post("https://ai.example/stt", vary=attempt).status_code == 200
     assert seen == ["pt-PT", "pt-BR"]
+
+
+FFMPEG = shutil.which("ffmpeg")
+
+
+@pytest.mark.skipif(FFMPEG is None, reason="ffmpeg not installed")
+def test_a_window_is_listened_to_on_its_own_and_heard_in_film_seconds(tmp_path):
+    assert FFMPEG is not None
+    film = tmp_path / "film.wav"
+    subprocess.run(  # noqa: S603 - our own arguments
+        [FFMPEG, "-loglevel", "error", "-f", "lavfi", "-i", "sine=duration=6", str(film)], check=True
+    )
+    phrase = {"offsetMilliseconds": 200, "durationMilliseconds": 900, "text": "Here's Kinuwani."}
+    senses = _senses([httpx.Response(200, json={"phrases": [phrase]})], [])
+    senses.ffmpeg = FFMPEG
+    usage: dict[str, float] = {}
+    heard = senses.listen(film, "en", usage, window=(2.3, 4.7))
+    assert heard == [(pytest.approx(2.5), pytest.approx(3.4), "Here's Kinuwani.")]
+    assert usage["audio_s"] == pytest.approx(2.4, abs=0.05)  # only the window is sent (and billed)

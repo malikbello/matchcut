@@ -1,5 +1,6 @@
+import pytest
 from matchcut_editing.edl import AudioEvent, Cut, Segment
-from matchcut_editing.qa import Shown, Spoken, expectations, judge, recall, summary, words
+from matchcut_editing.qa import Shown, Spoken, expectations, heard_again, judge, recall, summary, words
 
 
 def test_words_fold_case_accents_and_punctuation_in_any_script():
@@ -11,6 +12,54 @@ def test_recall_is_the_share_of_expected_words_found():
     assert recall("Quinouani scores his 9th", "and quinouani scores, his 9th!") == 1.0
     assert recall("Quinouani scores his 9th", "kino wani scores his 9th") == 0.75  # a name spelt its own way
     assert recall("", "anything") == 1.0
+
+
+def test_a_number_heard_in_words_was_heard():
+    club = ["Kestrel Bay FC"]
+    said = "Seventy-three minutes, Kestrel Bay FC lead one-nil."  # a sentence opening on a number
+    assert recall("73 minutes, Kestrel Bay FC lead 1-0.", said, club, "en") == 1.0
+    assert (
+        recall("Quinouani's 9th of the season", "Kinuani's ninth of the season", ["Quinouani"], "en") == 1.0
+    )
+    assert (
+        recall("53e minute, pas encore de but.", "Cinquante-troisième minute, pas encore de but.", (), "fr")
+        == 1.0
+    )
+    assert recall("Su 8.º gol", "su octavo gol", (), "es") == 1.0
+    assert recall("Su 8.º gol", "Su 8.º gol.", (), "es") == 1.0
+    assert words("su 8.º gol") == ["su", "8o", "gol"]
+
+
+def test_another_number_is_not_this_one():
+    assert recall("52 minutes", "fifty-three minutes", (), "en") == 0.5
+    assert recall("15 minutes", "fifty minutes", (), "en") == 0.5  # nearly is not enough for a number
+    assert recall("73 minutes", "Seventy-three minutes") == 0.5  # no language, no spelling
+    assert recall("1-0", "one-nil", (), "pcm") == 0.0  # Naija is checked for voice, not words
+
+
+def test_a_line_missed_in_the_whole_film_is_listened_to_again_on_its_own():
+    sp = Spoken(2.8, "Here's Quinouani, in on goal", "call", 1.4)
+    assert sp.alone == pytest.approx((2.3, 4.7))
+    names = ["Quinouani"]
+    report = judge("f.mp4", "en", [sp], [], [(0.3, 2.2, "Fifty-two minutes, goalless.")], {}, -16.0, names)
+    assert not report.passed
+    heard_again(report, 0, sp, [(2.8, 4.1, "Here's Kinuwani, in on goal.")], names)
+    line = report.lines[0]
+    assert report.passed
+    assert line["heard"]
+    assert line["listened"] == "again"
+    assert line["first_heard_as"] == ""
+    assert line["heard_as"] == "Here's Kinuwani, in on goal."
+    assert summary(report.as_dict())["again"] == 1
+
+
+def test_a_second_listen_that_hears_something_else_keeps_the_flag():
+    sp = Spoken(2.8, "Here's Quinouani, in on goal", "call", 1.4)
+    report = judge("f.mp4", "en", [sp], [], [], {}, -16.0, ["Quinouani"])
+    heard_again(report, 0, sp, [(2.8, 4.1, "The keeper gathers.")], ["Quinouani"])
+    assert not report.passed
+    assert "listened" not in report.lines[0]
+    assert summary(report.as_dict())["again"] == 0
 
 
 def _cut() -> tuple[Cut, list[dict], list[dict]]:

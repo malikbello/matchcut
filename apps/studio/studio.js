@@ -825,7 +825,7 @@ function reelItem(m) {
 const qaLines = (q) => {
   const heard = q.heard && !q.heard.endsWith("/0") ? `heard ${q.heard}` : "";
   const parts = [heard, q.voiced ? `voiced ${q.voiced}` : ""].filter(Boolean).join(", ") || "no";
-  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines`;
+  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines${q.again ? ` (${q.again} on a second listen)` : ""}`;
 };
 const qaText = (q) => `${qaLines(q)}, read ${q.read} captions, ${q.lufs ?? "?"} LUFS`;
 

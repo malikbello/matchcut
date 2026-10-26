@@ -31,7 +31,7 @@ const secs = (s) => (s == null ? "–" : s < 90 ? `${Math.round(s)} s` : `${Math
 const qaLines = (q) => {
   const heard = q.heard && !q.heard.endsWith("/0") ? `heard ${q.heard}` : "";
   const parts = [heard, q.voiced ? `voiced ${q.voiced}` : ""].filter(Boolean).join(", ") || "no";
-  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines`;
+  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines${q.again ? ` (${q.again} on a second listen)` : ""}`;
 };
 const dollars = (d) => (d == null ? "–" : d < 0.1 ? `$${d.toFixed(3)}` : `$${d.toFixed(2)}`);
 

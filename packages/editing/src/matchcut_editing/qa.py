@@ -21,7 +21,10 @@ from collections import Counter
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from difflib import SequenceMatcher
+from functools import cache
 from typing import Any
+
+from num2words import num2words
 
 from matchcut_editing.edl import Cut, call_lines
 
@@ -40,6 +43,12 @@ PRESENCE_ONLY = {"pcm"}
 # be judged word by word: a recogniser that splits the name into words ("aqui não ani") swallows
 # the one short word left. It is checked for being voiced where the plan puts it, and says so.
 MIN_WORDS = 3
+# a recogniser writes a number it hears in digits or in words ("Seventy-three minutes" opening a
+# sentence, "one-nil", "ninth"): either way it was heard. Spelled with num2words in the film's
+# language; a score's nought as football says it is not a number speller's word
+SPELLED = {"en": "en", "en-NG": "en", "fr": "fr", "es": "es", "pt": "pt", "ar": "ar"}
+NOUGHT = {"en": ("nil",), "en-NG": ("nil",)}
+ORDINAL = re.compile(r"^(\d+)(st|nd|rd|th|e|er|eme|o|a)$")  # 9th, 53e, 8o (8.º once folded)
 
 
 @dataclass
@@ -53,6 +62,13 @@ class Spoken:
     def until(self) -> float:
         """The latest film second its words may be heard."""
         return self.at + max(LISTEN_MIN_S, self.duration + LISTEN_AFTER_S)
+
+    @property
+    def alone(self) -> tuple[float, float]:
+        """The line's own stretch of the film, listened to again on its own when the whole film's
+        transcript missed it (a short call straight after another voice, under the crowd)."""
+        end = self.at + self.duration + LISTEN_BEFORE_S if self.duration else self.until
+        return max(0.0, self.at - LISTEN_BEFORE_S), end
 
 
 @dataclass
@@ -83,17 +99,68 @@ def expectations(cut: Cut, cues: list[dict], calls: list[dict]) -> tuple[list[Sp
 
 def words(text: str) -> list[str]:
     """Comparable words in any script: case, accents and punctuation set aside; digits kept as they
-    are (8th and 8 both give 8, so a recogniser's 'eighth' is the one thing that can miss)."""
+    are, an ordinal with its mark (8.º is one word, 8o, like 8th)."""
+    text = re.sub(r"(\d)\.\s?(?=[ºª])", r"\1", text)
     folded = unicodedata.normalize("NFKD", text.casefold())
     plain = "".join(ch for ch in folded if not unicodedata.combining(ch))
     return [w for w in re.split(r"[^\w]+", plain) if w]
 
 
-def recall(expected: str, got: str, names: Iterable[str] = ()) -> float:
+@cache
+def spelled(number: str, language: str) -> tuple[tuple[str, ...], ...]:
+    """A number token as a recogniser may write it in words in the film's language: 73 as
+    'seventy-three', 9th as 'ninth', 53e as 'cinquante-troisième', a score's 0 as 'nil'."""
+    lang = SPELLED.get(language)
+    ordinal = ORDINAL.match(number)
+    if lang is None or not (number.isdigit() or ordinal):
+        return ()
+    forms: list[str] = []
+    try:
+        if ordinal:
+            forms.append(num2words(int(ordinal.group(1)), lang=lang, to="ordinal"))
+        else:
+            forms.append(num2words(int(number), lang=lang))
+    except (NotImplementedError, OverflowError, ValueError):  # a form the language has no speller for
+        pass
+    if number == "0":
+        forms += NOUGHT.get(language, ())
+    return tuple(tuple(words(f)) for f in forms if words(f))
+
+
+def _take(have: Counter[str], w: str) -> bool:
+    """Take w, or a word heard nearly as written (NEAR), out of what was heard. A word with a
+    number in it is found exactly or spelled out, never nearly ('9th' is not 'the')."""
+    nearly = len(w) >= 3 and not any(ch.isdigit() for ch in w)
+    near = (
+        w
+        if have[w] > 0
+        else next(
+            (h for h in have if have[h] > 0 and nearly and SequenceMatcher(None, w, h).ratio() >= NEAR),
+            None,
+        )
+    )
+    if near is None:
+        return False
+    have[near] -= 1
+    return True
+
+
+def _take_all(have: Counter[str], form: tuple[str, ...]) -> bool:
+    """Take every word of a number said in words out of what was heard, or none of them. Exactly
+    as spelled: nearly is not enough for a number ('fifteen' is not 'fifty')."""
+    need = Counter(form)
+    if any(have[w] < n for w, n in need.items()):
+        return False
+    have.subtract(need)
+    return True
+
+
+def recall(expected: str, got: str, names: Iterable[str] = (), language: str = "") -> float:
     """The share of the expected words found in what was heard or read (order-free, with repeats).
     names: words a recogniser cannot be held to (the league's invented names, which it spells its
     own way or in another script); they are set aside, and a line made only of names counts as
-    found if anything was said there. A word found nearly as written counts (NEAR)."""
+    found if anything was said there. A word found nearly as written counts (NEAR), and so does a
+    number heard in words in the film's language."""
     every = words(expected)
     skip = {w for n in names for w in words(n)}
     want = [w for w in every if w not in skip]
@@ -102,23 +169,7 @@ def recall(expected: str, got: str, names: Iterable[str] = ()) -> float:
         return 1.0
     if not want:
         return 1.0 if have else 0.0
-    found = 0
-    for w in want:
-        near = (
-            w
-            if have[w] > 0
-            else next(
-                (
-                    h
-                    for h in have
-                    if have[h] > 0 and len(w) >= 3 and SequenceMatcher(None, w, h).ratio() >= NEAR
-                ),
-                None,
-            )
-        )
-        if near is not None:
-            have[near] -= 1
-            found += 1
+    found = sum(1 for w in want if _take(have, w) or any(_take_all(have, f) for f in spelled(w, language)))
     return found / len(want)
 
 
@@ -152,7 +203,7 @@ def judge(
     report = QAReport(film, language, lufs=lufs)
     for sp in spoken:
         near = " ".join(t for a, b, t in transcript if b >= sp.at - LISTEN_BEFORE_S and a <= sp.until)
-        r = recall(sp.text, near, names)
+        r = recall(sp.text, near, names, language)
         skip = {w for n in names for w in words(n)}
         presence = language in PRESENCE_ONLY or len([w for w in words(sp.text) if w not in skip]) < MIN_WORDS
         report.lines.append(
@@ -179,9 +230,29 @@ def judge(
                 "read_as": got[:300],
             }
         )
-    loud = lufs is not None and abs(lufs - TARGET_LUFS) <= LUFS_TOLERANCE
-    report.passed = all(x["heard"] for x in report.lines) and all(x["read"] for x in report.captions) and loud
+    report.passed = verdict(report)
     return report
+
+
+def verdict(report: QAReport) -> bool:
+    """Every line heard, every caption read, the level right."""
+    loud = report.lufs is not None and abs(report.lufs - TARGET_LUFS) <= LUFS_TOLERANCE
+    return all(x["heard"] for x in report.lines) and all(x["read"] for x in report.captions) and loud
+
+
+def heard_again(
+    report: QAReport,
+    i: int,
+    sp: Spoken,
+    transcript: list[tuple[float, float, str]],
+    names: Iterable[str] = (),
+) -> None:
+    """Judge line i again on what was heard when its own stretch of the film (Spoken.alone) was
+    listened to on its own. The same words must be heard; the report keeps both hearings."""
+    again = judge(report.film, report.language, [sp], [], transcript, {}, report.lufs, names).lines[0]
+    if again["heard"]:
+        report.lines[i] = {**again, "listened": "again", "first_heard_as": report.lines[i]["heard_as"]}
+        report.passed = verdict(report)
 
 
 def summary(report: dict[str, Any]) -> dict[str, Any]:
@@ -194,6 +265,7 @@ def summary(report: dict[str, Any]) -> dict[str, Any]:
         "passed": bool(report.get("passed")),
         "heard": f"{sum(1 for x in worded if x.get('heard'))}/{len(worded)}",
         "voiced": f"{sum(1 for x in voiced if x.get('heard'))}/{len(voiced)}" if voiced else None,
+        "again": sum(1 for x in lines if x.get("listened") == "again"),  # heard on a second listen
         "read": f"{sum(1 for x in caps if x.get('read'))}/{len(caps)}",
         "lufs": report.get("lufs"),
         "words": not any(x.get("check") == "voiced" for x in lines),

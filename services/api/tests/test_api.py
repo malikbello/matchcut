@@ -475,6 +475,7 @@ def test_a_moment_carries_the_qa_agents_verdict(tmp_path):
         "passed": True,
         "heard": "2/2",
         "voiced": None,
+        "again": 0,
         "read": "1/1",
         "lufs": -15.9,
         "words": True,
