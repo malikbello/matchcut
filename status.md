@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Sun 25 Oct 2026, night · **Phase:** D2 and D3 done and live (773cda4); E (demo and submission) waits for Malik. Branch `d5/fan-cuts` (PR #10, Malik merges)
+**Updated:** Mon 26 Oct 2026 · **Phase:** D2, D3 and audio description done; E (demo and submission) next. Branch `d5/fan-cuts` (PR #10, Malik merges)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -14,6 +14,11 @@
   - Agent-based match engine: 10 Hz tracking, offside line, low block, pressing, tackles, fouls, cards, substitutions, set pieces, hidden tactical change, true shot probabilities.
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
+
+## Resume here (handoff, 26 Oct)
+- **Audio description (ADR-0016), branch `d7/audio-description`, released as 7881e92:** every moment film and every fan's film is also made with a describer for blind and partially sighted fans: code-built descriptions (who has the ball, where, the build-up, the goal, the celebration, the replays, the minute and the score), phrased in code in 7 languages, voiced by a brisk describer voice of its own (2,779 lines, about US$2), placed only in gaps and by priority; QA-checked like every film. The Studio bar has an Audio description switch (reel, share links, fans' films); the Factory marks and plays described films. `matchcut-insights describe --match kes-wcr-7 --voice` regenerates them (out/describe, voices in out/media).
+- **Messaging for E (Malik, 25 Oct):** sell Matchcut's strengths with measured numbers: scale (the Recap Factory), League Memory, the languages, audio description.
+- **PRs:** #10 (fan cuts, QA, Factory) and #9 (Actions bumps) merged into main on 25 Oct (Malik authorised merging).
 
 ## Resume here (handoff, 25 Oct, night)
 - **Live on Azure: 773cda4** (Studio revision 11, job on 773cda4, 20 replicas at most, one warm Studio replica). Recap Factory measured on Azure: 21 films, first 54 to 59 s after the run starts, all in about 160 s, US$0.022 a film at list price, 20 of 21 pass QA (the one flag: two short Naija calls the recogniser heard no words in). Moment clips: 27 of 28 pass (the flag: the Nigerian English "is in on goal" heard as "Izinango").
