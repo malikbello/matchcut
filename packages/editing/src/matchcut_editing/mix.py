@@ -25,7 +25,7 @@ SILENCE_LUFS = -69.0  # the meter reads -70 for silence: nothing to set a gain f
 LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11"  # the fallback when the measurement finds only silence
 # the measuring pass uses the EBU R128 meter the QA agent judges by: loudnorm's own estimate read
 # 3.4 LU low on a 6.5 s described clip (-18.0 against -14.6), so its gain overshot
-METER = "ebur128=framelog=quiet"
+METER = "ebur128"  # no options: Debian 12's ffmpeg 5.1 (in the images) has no framelog
 
 
 def _between(windows: list[tuple[float, float]]) -> str:

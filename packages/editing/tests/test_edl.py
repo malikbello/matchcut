@@ -360,7 +360,8 @@ def test_the_master_is_measured_then_set_with_the_measurement():
                     package_durations=PACKAGES, clip_durations={})  # fmt: skip
     first = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"), measure=True)
     assert first[-3:] == ["-f", "null", "-"]
-    assert "ebur128" in first[first.index("-filter_complex") + 1]  # the meter the QA agent uses
+    measuring = first[first.index("-filter_complex") + 1]
+    assert "[mix]ebur128," in measuring  # the meter the QA agent uses, with no options ffmpeg 5.1 lacks
     log = """[Parsed_ebur128_0 @ 0x1] Summary:
 
   Integrated loudness:
