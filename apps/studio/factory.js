@@ -33,6 +33,9 @@ const qaLines = (q) => {
   const parts = [heard, q.voiced ? `voiced ${q.voiced}` : ""].filter(Boolean).join(", ") || "no";
   return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines${q.again ? ` (${q.again} on a second listen)` : ""}`;
 };
+// the described film has its own QA verdict: checked, flagged or not checked yet (null when there is none)
+const adStatusOf = (f) =>
+  f.ad?.qa ? (f.ad.qa.passed ? "checked" : (f.ad.qa.issues || []).some((i) => i.kind === "not checked") ? "unchecked" : "flagged") : null;
 const dollars = (d) => (d == null ? "–" : d < 0.1 ? `$${d.toFixed(3)}` : `$${d.toFixed(2)}`);
 
 async function api(path, options) {
@@ -118,9 +121,13 @@ function render() {
   $("s-cost-label").textContent = cost
     ? `Per film: compute ${dollars(cost.compute / perFan)}, QA ${dollars(cost.qa / perFan)}`
     : "Per film, list price";
-  const judged = c.checked + c.flagged;
-  $("s-qa").textContent = judged ? `${c.checked}/${judged}` : "–";
-  $("s-qa-label").textContent = c.unchecked ? `Passed QA · ${c.unchecked} not checked yet` : "Passed QA";
+  // every film is judged, the described ones too
+  const ads = films.map(adStatusOf).filter(Boolean);
+  const passed = c.checked + ads.filter((a) => a === "checked").length;
+  const judged = passed + c.flagged + ads.filter((a) => a === "flagged").length;
+  const unchecked = c.unchecked + ads.filter((a) => a === "unchecked").length;
+  $("s-qa").textContent = judged ? `${passed}/${judged}` : "–";
+  $("s-qa-label").textContent = unchecked ? `Passed QA · ${unchecked} not checked yet` : "Passed QA";
 
   renderButton();
   renderChart();
@@ -198,7 +205,7 @@ function cell(f, label) {
   else if (f.status === "unchecked") b.append(el("span", { class: "pip" }));
   else b.append(el("span", { class: "pip" }));
   b.append(el("span", { class: "t" }, f.at != null ? `${Math.round(f.at)}s` : ""));
-  if (f.ad) b.append(el("span", { class: `ad ${f.ad.qa?.passed ? "ok" : "flag"}`, title: "Also made with audio description" }, "AD"));
+  if (f.ad) b.append(el("span", { class: `ad ${{ checked: "ok", flagged: "flag" }[adStatusOf(f)] || "wait"}`, title: "Also made with audio description" }, "AD"));
   b.setAttribute("aria-label", `${name}: ${f.status}`);
   b.title = done ? `${name}: ${f.status}, made ${Math.round(f.at)} s into the run` : `${name}: ${f.status}`;
   if (done) b.addEventListener("click", () => openFilm(f, label));
@@ -212,8 +219,7 @@ function openFilm(f, label, withAd = false) {
   $("f-film-ad").setAttribute("aria-pressed", String(withAd));
   $("f-film-ad").querySelector("span").textContent = withAd ? "Play without audio description" : "Play with audio description";
   $("f-film-ad").onclick = () => openFilm(f, label, !withAd);
-  // the described film has its own QA verdict
-  const adStatus = f.ad?.qa ? (f.ad.qa.passed ? "checked" : (f.ad.qa.issues || []).some((i) => i.kind === "not checked") ? "unchecked" : "flagged") : f.status;
+  const adStatus = adStatusOf(f) || f.status;
   const verdict = { checked: "Checked", flagged: "Flagged", unchecked: "Not checked yet" }[withAd ? adStatus : f.status] || "";
   $("f-film-kicker").textContent = `${LANGS[f.lang] || f.lang}${withAd ? " · Audio described" : ""} · ${verdict}`;
   $("f-film-title").textContent = f.focus.side ? `${label} fans` : label;
