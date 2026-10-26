@@ -4,32 +4,28 @@ crowd   two bed loops under everything; the stadium song rises in the film's hig
         (goal packages, big chances); a real goal roar on every goal
 voice   the play-by-play calls and verified lines, each at its planned time
 ducking the crowd is side-chain compressed by the voice, so commentary always reads
-master  loudness-normalised to -16 LUFS (the common target for streaming and social video), in two
-        passes: measured, then set with the measurement (one pass lands up to 2 LU low on a
-        short clip, which the QA agent caught on the 7 s conceded clips)
+master  -16 LUFS (the common target for streaming and social video) in two passes: the mix is
+        measured (EBU R128), then given exactly the gain it needs, with a true-peak limiter at
+        -1.5 dBTP. loudnorm alone landed 2 LU low on short clips and, in its linear mode, 3.4 LU
+        loud on a short described clip: the QA agent caught both
 """
 
 from __future__ import annotations
 
-import json
 import math
 import re
 import subprocess
 from pathlib import Path
-from typing import Any
 
 from matchcut_editing.edl import Cut
 
 ROARS = ["roar_1", "roar_2", "roar_3", "roar_4", "roar_5"]
-LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11"
-# loudnorm's report keys, and the option each measurement is passed back as
-MEASURED = {
-    "input_i": "measured_I",
-    "input_tp": "measured_TP",
-    "input_lra": "measured_LRA",
-    "input_thresh": "measured_thresh",
-    "target_offset": "offset",
-}
+TARGET_LUFS, TRUE_PEAK_DB = -16.0, -1.5
+SILENCE_LUFS = -69.0  # the meter reads -70 for silence: nothing to set a gain from
+LOUDNORM = "loudnorm=I=-16:TP=-1.5:LRA=11"  # the fallback when the measurement finds only silence
+# the measuring pass uses the EBU R128 meter the QA agent judges by: loudnorm's own estimate read
+# 3.4 LU low on a 6.5 s described clip (-18.0 against -14.6), so its gain overshot
+METER = "ebur128=framelog=quiet"
 
 
 def _between(windows: list[tuple[float, float]]) -> str:
@@ -95,9 +91,10 @@ def mix_command(
     # explicit output format: older ffmpeg (Debian 12 ships 5.1) cannot infer the layout here
     norm = LOUDNORM
     if measure:
-        norm += ":print_format=json"
-    elif measured:
-        norm += "".join(f":{MEASURED[k]}={v}" for k, v in measured.items()) + ":linear=true"
+        norm = METER
+    elif measured:  # exactly the gain the measurement asks for, peaks held under -1.5 dBTP
+        gain = TARGET_LUFS - measured["input_i"]
+        norm = f"volume={gain:.2f}dB,alimiter=limit={10 ** (TRUE_PEAK_DB / 20):.4f}:level=false"
     filters.append(f"[mix]{norm},aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[out]")
     args += ["-filter_complex", ";".join(filters), "-map", "[out]"]
     if measure:
@@ -106,16 +103,13 @@ def mix_command(
 
 
 def loudness_report(log: str) -> dict[str, float] | None:
-    """loudnorm's measurement from its log (None when it measured silence or printed nothing)."""
-    found = re.findall(r"\{[^{}]*\"input_i\"[^{}]*\}", log)
+    """The integrated loudness from the EBU R128 meter's summary (None when it measured silence
+    or printed nothing)."""
+    found = re.findall(r"I:\s+(-?\d+(?:\.\d+)?) LUFS", log)
     if not found:
         return None
-    report: dict[str, Any] = json.loads(found[-1])
-    try:
-        values = {k: float(report[k]) for k in MEASURED}
-    except (KeyError, ValueError):
-        return None
-    return values if all(math.isfinite(v) for v in values.values()) else None
+    value = float(found[-1])
+    return {"input_i": value} if math.isfinite(value) and value > SILENCE_LUFS else None
 
 
 def mix(cut: Cut, media_root: Path, crowd_dir: Path, out: Path, ffmpeg: str = "ffmpeg") -> Path:

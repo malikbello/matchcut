@@ -360,31 +360,22 @@ def test_the_master_is_measured_then_set_with_the_measurement():
                     package_durations=PACKAGES, clip_durations={})  # fmt: skip
     first = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"), measure=True)
     assert first[-3:] == ["-f", "null", "-"]
-    assert "print_format=json" in first[first.index("-filter_complex") + 1]
-    log = """noise
-[Parsed_loudnorm_0 @ 0x1]
-{
- "input_i" : "-18.20",
- "input_tp" : "-4.10",
- "input_lra" : "3.40",
- "input_thresh" : "-28.50",
- "target_offset" : "0.20"
-}
+    assert "ebur128" in first[first.index("-filter_complex") + 1]  # the meter the QA agent uses
+    log = """[Parsed_ebur128_0 @ 0x1] Summary:
+
+  Integrated loudness:
+    I:         -18.2 LUFS
+    Threshold: -28.5 LUFS
 """
     measured = loudness_report(log)
-    assert measured == {
-        "input_i": -18.2,
-        "input_tp": -4.1,
-        "input_lra": 3.4,
-        "input_thresh": -28.5,
-        "target_offset": 0.2,
-    }
+    assert measured == {"input_i": -18.2}
     second = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"), measured=measured)
     graph = second[second.index("-filter_complex") + 1]
-    assert "measured_I=-18.2:measured_TP=-4.1" in graph
-    assert graph.count("linear=true") == 1
+    assert "volume=2.20dB" in graph  # exactly what -18.2 LUFS needs to reach -16
+    assert "alimiter=limit=0.8414:level=false" in graph  # peaks held under -1.5 dBTP
+    assert "loudnorm" not in graph
     assert second[-1] == "out.m4a"
-    assert loudness_report(log.replace("-18.20", "-inf")) is None  # silence: one pass instead
+    assert loudness_report(log.replace("-18.2 LUFS", "-70.0 LUFS", 1)) is None  # silence: one pass instead
     assert loudness_report("no report") is None
 
 
