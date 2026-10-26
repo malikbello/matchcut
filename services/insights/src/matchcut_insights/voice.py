@@ -18,6 +18,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from xml.sax.saxutils import escape
 
 import httpx
@@ -169,8 +170,26 @@ class AzureSpeech:
         raise AssertionError("unreachable")
 
 
+TTS_USD_PER_CHAR = 16 / 1_000_000  # neural text to speech (S1), list price
+UNCONFIRMED_LIMIT_USD = 1.0  # a voicing batch above this asks for --yes first
+
+
+def billable_chars(text: str, lang: str, voice: str, **delivery: Any) -> int:
+    """What Speech bills for one line: every character of the SSML inside <voice>, markup
+    included (only the <speak> and <voice> tags are free). The describer's pace and silence
+    markup is longer than most of its lines, which made the first voicing about 3x the estimate."""
+    body = ssml(text, lang, voice, **delivery)
+    inner = body[body.index(">", body.index("<voice")) + 1 : body.rindex("</voice>")]
+    return len(inner)
+
+
 def voice_descriptions(
-    descs: list, match_id: str, speech: AzureSpeech, media_root: str | Path, workers: int = 8
+    descs: list,
+    match_id: str,
+    speech: AzureSpeech,
+    media_root: str | Path,
+    workers: int = 8,
+    confirm: Callable[[float, int], bool] | None = None,
 ) -> int:
     """Voice audio-description lines (see describe.py) with each language's describer voice, in
     parallel, cached like the calls: only new or reworded lines are synthesised."""
@@ -190,6 +209,13 @@ def voice_descriptions(
         d.audio, d.voice = rel.as_posix(), key
         if not ((Path(media_root) / rel).is_file() and manifest.get(d.desc_id) == cache_key(key, d.text)):
             todo.append((d, voice, key))
+
+    chars = sum(
+        billable_chars(d.text, d.language, voice, rate=DESCRIBER_RATE, tight=True) for d, voice, _key in todo
+    )
+    cost = chars * TTS_USD_PER_CHAR
+    if todo and confirm is not None and not confirm(cost, len(todo)):
+        raise SystemExit(f"not voiced: {len(todo)} lines, {chars} billable characters, about US${cost:.2f}")
 
     def work(item: tuple) -> tuple:
         d, voice, key = item

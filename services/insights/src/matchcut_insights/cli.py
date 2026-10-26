@@ -276,13 +276,18 @@ def cmd_calls(args: argparse.Namespace) -> None:
 def cmd_describe(args: argparse.Namespace) -> None:
     """Write (and voice) a match's audio description: the live track and each moment clip's."""
     from matchcut_insights.describe import describe  # noqa: PLC0415
-    from matchcut_insights.voice import voice_descriptions  # noqa: PLC0415
+    from matchcut_insights.voice import UNCONFIRMED_LIMIT_USD, voice_descriptions  # noqa: PLC0415
 
     feed = json.loads(gzip.decompress((Path(args.feeds) / f"{args.match}.json.gz").read_bytes()))
     moments = [{"kind": k, "t": g["t"]} for g in feed.get("goals", []) for k in ("goal", "conceded")]
     descs = describe(args.match, feed, moments)
     if args.voice:
-        voiced = voice_descriptions(descs, args.match, AzureSpeech.from_env(), args.media)
+
+        def confirm(cost: float, lines: int) -> bool:
+            print(f"{lines} lines to voice, about US${cost:.2f} at list price")
+            return cost <= UNCONFIRMED_LIMIT_USD or args.yes
+
+        voiced = voice_descriptions(descs, args.match, AzureSpeech.from_env(), args.media, confirm=confirm)
         print(f"voiced {voiced} descriptions -> {args.media}/audio/{args.match}")
     out = Path(args.out_dir) / f"{args.match}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -338,6 +343,7 @@ def main(argv: list[str] | None = None) -> None:
     d = sub.add_parser("describe", help="write a match's audio description (no model needed)")
     d.add_argument("--match", required=True)
     d.add_argument("--voice", action="store_true", help="voice it with Azure AI Speech")
+    d.add_argument("--yes", action="store_true", help="voice even when it costs more than US$1")
     d.add_argument("--feeds", default="out/feeds")
     d.add_argument("--media", default="out/media")
     d.add_argument("--out-dir", default="out/describe")

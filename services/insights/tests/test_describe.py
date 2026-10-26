@@ -106,3 +106,22 @@ def test_every_language_says_every_line():
     }
     assert len({tuple(v) for v in by_lang.values()}) == 1  # the same lines in every language
     assert all(d.text and "{" not in d.text for d in descs)
+
+
+def test_voicing_is_priced_with_its_markup_and_held_above_a_dollar(tmp_path):
+    import pytest  # noqa: PLC0415
+    from matchcut_insights.describe import Description  # noqa: PLC0415
+    from matchcut_insights.voice import billable_chars, voice_descriptions  # noqa: PLC0415
+
+    plain = billable_chars("Replay.", "en", "en-GB-SoniaNeural")
+    marked = billable_chars("Replay.", "en", "en-GB-SoniaNeural", rate="+30%", tight=True)
+    assert plain >= len("Replay.")
+    assert marked > 10 * len("Replay.")  # the pace and silence markup is billed too
+
+    class NoSpeech:
+        def synthesize_with(self, *a):
+            raise AssertionError("must not be called")
+
+    lines = [Description(f"AD-P{i:04d}-en", i, "play", "en", "x" * 200) for i in range(400)]
+    with pytest.raises(SystemExit):
+        voice_descriptions(lines, "m", NoSpeech(), tmp_path, confirm=lambda cost, n: cost <= 1.0)  # type: ignore[arg-type]
