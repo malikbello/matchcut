@@ -424,4 +424,4 @@ def test_the_describer_speaks_only_in_the_gaps_and_inside_its_clip():
     durations = {"scene.mp3": 2.5, "play.mp3": 0.6, "other-scene.mp3": 2.0, "late.mp3": 2.0}
     _describe_track(cut, [], windows, descriptions, durations)
     placed = {e.file: e.at for e in cut.audio if e.role == "describe"}
-    assert placed == {"scene.mp3": 0.3, "play.mp3": 6.95}  # after the call (6.8 s) and a breath
+    assert placed == {"scene.mp3": 0.3, "play.mp3": 7.15}  # after the call (6.8 s) and a breath

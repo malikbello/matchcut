@@ -103,16 +103,20 @@ function render() {
 
   const c = { waiting: films.length, making: 0, checked: 0, flagged: 0, unchecked: 0, failed: 0, ...run.counts };
   const made = c.checked + c.flagged + c.unchecked;
-  $("s-made").textContent = `${made}/${run.total ?? films.length}`;
+  // each fan's replica also makes the described film: two films a fan, priced together
+  const perFan = films.some((f) => f.ad) ? 2 : 1;
+  const described = films.filter((f) => f.ad).length;
+  $("s-made").textContent = `${made + described}/${(run.total ?? films.length) * perFan}`;
+  $("s-made-label").textContent = perFan === 2 ? "Films made, half of them audio described" : "Films made";
   const peak = run.peak_replicas || 0;
   $("s-replicas").textContent = run.run && !run.finished ? String(c.making) : String(peak);
   $("s-replicas-label").textContent = run.run && !run.finished ? "Replicas at work" : "Replicas at peak";
   $("s-first").textContent = secs(run.first_film_s);
   $("s-all").textContent = run.finished ? secs(run.all_films_s) : run.run ? `${secs(elapsedNow())}…` : "–";
   const cost = run.cost_per_film;
-  $("s-cost").textContent = cost ? dollars(cost.total) : "–";
+  $("s-cost").textContent = cost ? dollars(cost.total / perFan) : "–";
   $("s-cost-label").textContent = cost
-    ? `Per film: compute ${dollars(cost.compute)}, QA ${dollars(cost.qa)}`
+    ? `Per film: compute ${dollars(cost.compute / perFan)}, QA ${dollars(cost.qa / perFan)}`
     : "Per film, list price";
   const judged = c.checked + c.flagged;
   $("s-qa").textContent = judged ? `${c.checked}/${judged}` : "–";
@@ -208,20 +212,22 @@ function openFilm(f, label, withAd = false) {
   $("f-film-ad").setAttribute("aria-pressed", String(withAd));
   $("f-film-ad").querySelector("span").textContent = withAd ? "Play without audio description" : "Play with audio description";
   $("f-film-ad").onclick = () => openFilm(f, label, !withAd);
-  const verdict = { checked: "Checked", flagged: "Flagged", unchecked: "Not checked yet" }[f.status] || "";
-  $("f-film-kicker").textContent = `${LANGS[f.lang] || f.lang} · ${verdict}`;
+  // the described film has its own QA verdict
+  const adStatus = f.ad?.qa ? (f.ad.qa.passed ? "checked" : (f.ad.qa.issues || []).some((i) => i.kind === "not checked") ? "unchecked" : "flagged") : f.status;
+  const verdict = { checked: "Checked", flagged: "Flagged", unchecked: "Not checked yet" }[withAd ? adStatus : f.status] || "";
+  $("f-film-kicker").textContent = `${LANGS[f.lang] || f.lang}${withAd ? " · Audio described" : ""} · ${verdict}`;
   $("f-film-title").textContent = f.focus.side ? `${label} fans` : label;
   const q = (withAd ? f.ad?.qa : f.qa) || {};
   const facts = [
+    withAd && f.ad ? `Audio described: ${f.ad.lines} descriptions in the gaps between the commentary` : "",
     `${f.duration ?? "?"} s film, made in ${Math.round(f.seconds ?? 0)} s on its own replica`,
     `${qaLines(q)}, read ${q.read ?? "?"} captions, ${q.lufs ?? "?"} LUFS`,
-    f.cost ? `Cost ${dollars(f.cost.total)}: compute ${dollars(f.cost.compute)}, QA ${dollars(f.cost.qa)}` : "",
+    f.cost ? `Cost of this fan's ${f.ad ? "two films" : "film"}: ${dollars(f.cost.total)} (compute ${dollars(f.cost.compute)}, QA ${dollars(f.cost.qa)})` : "",
   ].filter(Boolean);
   const at = (s) => (s == null ? "" : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")} `);
   const flagged = (q.issues || []).map((i) => el("li", { class: "issue" },
     el("strong", {}, `${at(i.at)}${i.kind}`), " ", el("span", { dir: "auto" }, i.text)));
   $("f-film-facts").replaceChildren(...facts.map((t) => el("li", {}, t)), ...flagged);
-  if (withAd && f.ad) facts.unshift(`Audio described: ${f.ad.lines} descriptions in the gaps between the commentary`);
   if (!$("f-film").open) $("f-film").showModal();
   $("f-video").play().catch(() => {});
 }
