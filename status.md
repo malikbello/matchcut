@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Mon 26 Oct 2026 · **Phase:** D2, D3 and audio description done; E (demo and submission) next. Branch `d5/fan-cuts` (PR #10, Malik merges)
+**Updated:** Mon 26 Oct 2026, night · **Phase:** audio description released; E (demo film and submission) in progress. Branch `d7/audio-description` (PR to main)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -14,6 +14,13 @@
   - Agent-based match engine: 10 Hz tracking, offside line, low block, pressing, tackles, fouls, cards, substitutions, set pieces, hidden tactical change, true shot probabilities.
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
+
+## Resume here (handoff, 26 Oct, night)
+- **Live on Azure: 919d8aa** (Studio revision 17, job on 919d8aa). Moment films: 28 of 28 pass QA, and 28 of 28 described. Recap Factory run f-54036148a78b: 21 fans, 42 films (each fan's film and its audio-described twin), the first 87 s after the run started, all 42 in 3 min 22 s, US$0.022 a film at list price, **42 of 42 passed QA**.
+- **QA agent (ADR-0014):** a number counts as heard in digits or in words in the film's language (num2words; never nearly), and a line the whole film's transcript misses gets a second listen over its own stretch of the film, judged by the same rule. The Factory's QA tile now judges all 42 films.
+- **Describer:** a 0.35 s breath beside any other voice. Voicing a batch is priced first and needs `--yes` above US$1 (Azure bills SSML markup).
+- **Azure spend:** month to date about US$28 of trial credit (US$19 of it the describer's voicing on 25 Oct); about US$2 to 2.50 a day while the Studio stays warm.
+- **Next: E.** Demo film (under 2 minutes, footage from the live site), README for judges, submission text and testing instructions (the access code goes in the form, never the repo), repo public on submission day.
 
 ## Resume here (handoff, 26 Oct)
 - **Audio description (ADR-0016), branch `d7/audio-description`, released as 750d91a:** every moment film and every fan's film is also made with a describer for blind and partially sighted fans: code-built descriptions (who has the ball, where, the build-up, the goal, the celebration, the replays, the minute and the score), phrased in code in 7 languages, voiced by a brisk describer voice of its own (2,779 lines, about US$2), placed only in gaps and by priority; QA-checked like every film. The Studio bar has an Audio description switch (reel, share links, fans' films); the Factory marks and plays described films. `matchcut-insights describe --match kes-wcr-7 --voice` regenerates them (out/describe, voices in out/media).
