@@ -1,6 +1,6 @@
 # Matchcut status
 
-**Updated:** Mon 26 Oct 2026, night · **Phase:** audio description released; E (demo film and submission) in progress. Branch `d7/audio-description` (PR to main)
+**Updated:** Tue 27 Oct 2026 · **Phase:** E (demo film and submission). Branch `d7/audio-description` (PR #13 to main)
 
 ## Done
 - **Design:** functional and Azure component diagrams (`docs/architecture`), brand system and board (`docs/brand`), design tokens (`packages/design-tokens/tokens.json`).
@@ -14,6 +14,11 @@
   - Agent-based match engine: 10 Hz tracking, offside line, low block, pressing, tackles, fouls, cards, substitutions, set pieces, hidden tactical change, true shot probabilities.
   - Realism report (`reports/realism.md`).
 - **Quality:** 24 tests passing, 88% coverage; ruff and pyright clean.
+
+## Resume here (handoff, 27 Oct)
+- **E in progress:** the demo film (1:56; footage recorded from the live deployment: the Studio, the fan's reel on a phone, fan films, a filmed Recap Factory run f-090104fcae1d: 42 films in 3 min 10 s, 20 replicas, US$0.022 a film, 41 of 42 passed QA) is rendered and in review; captions and the YouTube description are ready. README rewritten for judges.
+- **Before the repo goes public:** history checked for secrets (none: no keys, tokens or the access code in any commit) and for licensed assets (players.glb and moves.glb are built from Quaternius CC0 libraries; Mixamo-derived files have only ever lived in git-ignored folders).
+- **Next:** merge PR #13, upload the film, make the repo public, submit (closes 28 Oct, 07:59 WAT).
 
 ## Resume here (handoff, 26 Oct, night)
 - **Live on Azure: 919d8aa** (Studio revision 17, job on 919d8aa). Moment films: 28 of 28 pass QA, and 28 of 28 described. Recap Factory run f-54036148a78b: 21 fans, 42 films (each fan's film and its audio-described twin), the first 87 s after the run started, all 42 in 3 min 22 s, US$0.022 a film at list price, **42 of 42 passed QA**.
