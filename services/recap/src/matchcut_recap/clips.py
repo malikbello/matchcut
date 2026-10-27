@@ -173,28 +173,34 @@ def finish_films(
     ffmpeg: str = "ffmpeg",
 ) -> dict[str, tuple[Path, dict[str, Any] | None]]:
     """Each language's film of a clip (the captioned clip with its soundtrack) and the QA agent's
-    report on it: {lang: (film, report)}. Languages run side by side; a QA failure is reported,
-    never raised (the film is published either way, and its report says what is wrong)."""
+    report on it: {lang: (film, report)}, and the described film for blind and partially sighted
+    fans where the match has an audio description: {"<lang>.ad": (film, report)}. Films run side
+    by side; a QA failure is reported, never raised (the film is published either way, and its
+    report says what is wrong)."""
     packages = {s.goal_t: s.duration for s in segments if s.kind == "package" and s.goal_t is not None}
 
-    def one(lang: str) -> tuple[str, Path, dict[str, Any] | None] | None:
+    def one(job: tuple[str, bool]) -> tuple[str, Path, dict[str, Any] | None] | None:
+        lang, described = job
         clip = work / f"{key}.{lang}.mp4"
         if not clip.is_file():
             return None
         inp = load(data, match, lang)
+        if described and not inp.descriptions:
+            return None
+        variant = f"{lang}.ad" if described else lang
         cut = moment_cut(
             inp.feed, inp.cues, inp.calls, key, language=lang, aspect="",
             package_durations=packages, clip_durations=inp.durations,
+            descriptions=inp.descriptions if described else None,
         )  # fmt: skip
-        film = work / f"{key}.{lang}.share.mp4"
+        film = work / f"{key}.{variant}.share.mp4"
         with tempfile.TemporaryDirectory() as tmp:
             assemble_cut(cut, [clip], data / "media", crowd, Path(tmp), ffmpeg).replace(film)
         report: dict[str, Any] | None = None
         if senses is not None:
+            said = inp.calls + (inp.descriptions if described else [])
             try:
-                report = qa_film(
-                    film, cut, inp.cues, inp.calls, lang, senses, league_names(inp.feed)
-                ).as_dict()
+                report = qa_film(film, cut, inp.cues, said, lang, senses, league_names(inp.feed)).as_dict()
             except Exception as exc:  # perception down is a report, not a failed render
                 report = {
                     "film": film.name,
@@ -202,8 +208,8 @@ def finish_films(
                     "passed": False,
                     "error": f"{type(exc).__name__}: {exc}"[:300],
                 }
-        return lang, film, report
+        return variant, film, report
 
     with ThreadPoolExecutor(max_workers=4) as pool:
-        done = [r for r in pool.map(one, langs) if r]
-    return {lang: (film, report) for lang, film, report in done}
+        done = [r for r in pool.map(one, [(lang, ad) for lang in langs for ad in (False, True)]) if r]
+    return {variant: (film, report) for variant, film, report in done}

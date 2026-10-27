@@ -360,31 +360,23 @@ def test_the_master_is_measured_then_set_with_the_measurement():
                     package_durations=PACKAGES, clip_durations={})  # fmt: skip
     first = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"), measure=True)
     assert first[-3:] == ["-f", "null", "-"]
-    assert "print_format=json" in first[first.index("-filter_complex") + 1]
-    log = """noise
-[Parsed_loudnorm_0 @ 0x1]
-{
- "input_i" : "-18.20",
- "input_tp" : "-4.10",
- "input_lra" : "3.40",
- "input_thresh" : "-28.50",
- "target_offset" : "0.20"
-}
+    measuring = first[first.index("-filter_complex") + 1]
+    assert "[mix]ebur128," in measuring  # the meter the QA agent uses, with no options ffmpeg 5.1 lacks
+    log = """[Parsed_ebur128_0 @ 0x1] Summary:
+
+  Integrated loudness:
+    I:         -18.2 LUFS
+    Threshold: -28.5 LUFS
 """
     measured = loudness_report(log)
-    assert measured == {
-        "input_i": -18.2,
-        "input_tp": -4.1,
-        "input_lra": 3.4,
-        "input_thresh": -28.5,
-        "target_offset": 0.2,
-    }
+    assert measured == {"input_i": -18.2}
     second = mix_command(cut, Path("media"), Path("crowd"), Path("out.m4a"), measured=measured)
     graph = second[second.index("-filter_complex") + 1]
-    assert "measured_I=-18.2:measured_TP=-4.1" in graph
-    assert graph.count("linear=true") == 1
+    assert "volume=2.20dB" in graph  # exactly what -18.2 LUFS needs to reach -16
+    assert "alimiter=limit=0.8414:level=false" in graph  # peaks held under -1.5 dBTP
+    assert "loudnorm" not in graph
     assert second[-1] == "out.m4a"
-    assert loudness_report(log.replace("-18.20", "-inf")) is None  # silence: one pass instead
+    assert loudness_report(log.replace("-18.2 LUFS", "-70.0 LUFS", 1)) is None  # silence: one pass instead
     assert loudness_report("no report") is None
 
 
@@ -411,3 +403,25 @@ def test_no_voice_or_call_line_runs_over_a_cut():
     cut.audio.append(AudioEvent(5.9, "edge.mp3", "call", 0.5))
     lines = call_lines(cut, [*calls, {"audio": "edge.mp3", "text": "In!"}])
     assert all(end <= 6.5 for a, end, _t in lines if a < 6.5)
+
+
+def test_the_describer_speaks_only_in_the_gaps_and_inside_its_clip():
+    from matchcut_editing.edl import AudioEvent, Cut, Segment, _describe_track  # noqa: PLC0415
+
+    cut = Cut("kes-wcr-7", "en", "9x16", "x", "KES v WCR")
+    cut.segments = [
+        Segment("live", 8.6, t0=0, clip="goal-8000"),
+        Segment("live", 6.5, t0=20000, clip="conceded-25000"),
+    ]
+    cut.audio = [AudioEvent(6.0, "call.mp3", "call", 0.8)]  # the caller, 6.0 to 6.8 s
+    windows = [(0.0, 8.6, 0.0, 8600.0), (8.6, 15.1, 20000.0, 26500.0)]
+    descriptions = [
+        {"t_ms": 300, "audio": "scene.mp3", "clip": "goal-8000"},  # opens the goal clip
+        {"t_ms": 5900, "audio": "play.mp3"},  # would run into the call: waits for it
+        {"t_ms": 20300, "audio": "other-scene.mp3", "clip": "goal-8000"},  # not this clip's line
+        {"t_ms": 25500, "audio": "late.mp3"},  # would run over the end of the clip
+    ]
+    durations = {"scene.mp3": 2.5, "play.mp3": 0.6, "other-scene.mp3": 2.0, "late.mp3": 2.0}
+    _describe_track(cut, [], windows, descriptions, durations)
+    placed = {e.file: e.at for e in cut.audio if e.role == "describe"}
+    assert placed == {"scene.mp3": 0.3, "play.mp3": 7.15}  # after the call (6.8 s) and a breath

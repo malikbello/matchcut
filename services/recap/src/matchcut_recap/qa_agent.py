@@ -26,7 +26,7 @@ from typing import Any
 
 import httpx
 from matchcut_editing.edl import Cut
-from matchcut_editing.qa import QAReport, expectations, judge
+from matchcut_editing.qa import QAReport, expectations, heard_again, judge
 
 STT_PATH = "/speechtotext/transcriptions:transcribe?api-version=2024-11-15"
 CHAT_API = "2025-04-01-preview"
@@ -127,10 +127,16 @@ class Perception:
         raise AssertionError("unreachable")
 
     def listen(
-        self, film: Path, language: str, usage: dict[str, float] | None = None
+        self,
+        film: Path,
+        language: str,
+        usage: dict[str, float] | None = None,
+        window: tuple[float, float] | None = None,
     ) -> list[tuple[float, float, str]]:
-        """What is said in the film, as (start s, end s, text) phrases. `usage` counts the audio
-        seconds sent (what Speech bills)."""
+        """What is said in the film (or in one window of it), as (start s, end s, text) phrases in
+        film seconds. `usage` counts the audio seconds sent (what Speech bills)."""
+        start = window[0] if window else 0.0
+        trim = ["-ss", f"{window[0]:.2f}", "-to", f"{window[1]:.2f}"] if window else []
         with tempfile.TemporaryDirectory() as tmp:
             wav = Path(tmp) / "sound.wav"
             _run(
@@ -142,6 +148,7 @@ class Perception:
                     "-y",
                     "-i",
                     str(film),
+                    *trim,
                     "-ac",
                     "1",
                     "-ar",
@@ -163,8 +170,8 @@ class Perception:
             r = self._post(self.endpoint + STT_PATH, vary=attempt)
         return [
             (
-                p["offsetMilliseconds"] / 1000,
-                (p["offsetMilliseconds"] + p["durationMilliseconds"]) / 1000,
+                start + p["offsetMilliseconds"] / 1000,
+                start + (p["offsetMilliseconds"] + p["durationMilliseconds"]) / 1000,
                 p["text"],
             )
             for p in r.json().get("phrases", [])
@@ -233,12 +240,20 @@ def qa_film(
     usage: dict[str, float] | None = None,
 ) -> QAReport:
     """Listen to the film, read its captions, measure its level, and judge it against its plan.
-    `usage` counts what the agent's senses used (audio seconds, tokens), for the film's cost."""
+    A line the whole film's transcript misses is listened to again on its own, as a person
+    checking would: a recogniser can drop a short call straight after another voice. `usage`
+    counts what the agent's senses used (audio seconds, tokens), for the film's cost."""
     names = names or []
     spoken, shown = expectations(cut, cues, calls)
     transcript = senses.listen(film, language, usage) if spoken else []
     reads = senses.read(film, [s.middle for s in shown], usage) if shown else {}
-    return judge(film.name, language, spoken, shown, transcript, reads, loudness(film, senses.ffmpeg), names)
+    report = judge(
+        film.name, language, spoken, shown, transcript, reads, loudness(film, senses.ffmpeg), names
+    )
+    for i, sp in enumerate(spoken):
+        if not report.lines[i]["heard"]:
+            heard_again(report, i, sp, senses.listen(film, language, usage, window=sp.alone), names)
+    return report
 
 
 def league_names(feed: dict) -> list[str]:

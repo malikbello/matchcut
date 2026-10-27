@@ -718,7 +718,7 @@ async function followCut() {
 async function makeCut(e) {
   e.preventDefault();
   if (!state.match) return;
-  const body = { match: state.match.match_id, lang: $("cut-lang").value, aspect: cut.aspect };
+  const body = { match: state.match.match_id, lang: $("cut-lang").value, aspect: cut.aspect, described: described.on };
   if (cut.focus === "player") body.player = $("cut-player").value; else body.side = cut.side;
   cutStage("working");
   $("cut-state").textContent = "Sending your request";
@@ -754,14 +754,18 @@ const reel = { items: new Map(), clips: [], timer: 0, open: null };
 const reelLang = () => $("cut-lang").value || "en";
 const focusQuery = () =>
   cut.focus === "player" ? `player=${encodeURIComponent($("cut-player").value)}` : `side=${cut.side}`;
+// audio description: films with a describer in the gaps, for blind and partially sighted fans
+// (the fan's choice is remembered on this device)
+const described = { on: false };
+try { described.on = localStorage.getItem("matchcut.ad") === "1"; } catch { /* storage blocked: off */ }
 const momentUrl = (key, lang) =>
-  `/media/moments/${encodeURIComponent(state.match.match_id)}/${cut.aspect}/${key}${lang ? `.${lang}.mp4` : ".jpg"}`;
+  `/media/moments/${encodeURIComponent(state.match.match_id)}/${cut.aspect}/${key}${lang ? `.${lang}${described.on ? ".ad" : ""}.mp4` : ".jpg"}`;
 
 async function refreshReel() {
   clearTimeout(reel.timer);
   reel.timer = setTimeout(refreshReel, 4000);
   if (!state.match || RENDER || $("cut").hidden) return;
-  const q = `${focusQuery()}&lang=${encodeURIComponent(reelLang())}&aspect=${cut.aspect}&upto=${Math.round(state.t)}`;
+  const q = `${focusQuery()}&lang=${encodeURIComponent(reelLang())}&aspect=${cut.aspect}&upto=${Math.round(state.t)}${described.on ? "&described=true" : ""}`;
   let data;
   try { data = await api(`/api/matches/${encodeURIComponent(state.match.match_id)}/reel?${q}`); } catch { return; }
   const items = [...data.moments, ...reel.clips.filter((c) => c.t <= state.t + 60000)];
@@ -821,13 +825,14 @@ function reelItem(m) {
 const qaLines = (q) => {
   const heard = q.heard && !q.heard.endsWith("/0") ? `heard ${q.heard}` : "";
   const parts = [heard, q.voiced ? `voiced ${q.voiced}` : ""].filter(Boolean).join(", ") || "no";
-  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines`;
+  return `${parts.charAt(0).toUpperCase()}${parts.slice(1)} lines${q.again ? ` (${q.again} on a second listen)` : ""}`;
 };
 const qaText = (q) => `${qaLines(q)}, read ${q.read} captions, ${q.lufs ?? "?"} LUFS`;
 
 function openMoment(m) {
   reel.open = m;
-  $("moment-qa").textContent = m.qa ? `QA agent: ${m.qa.passed ? "checked" : "flagged"}. ${qaText(m.qa)}.` : "";
+  $("moment-qa").textContent = (described.on ? "Audio described. " : "") +
+    (m.qa ? `QA agent: ${m.qa.passed ? "checked" : "flagged"}. ${qaText(m.qa)}.` : "");
   const src = momentUrl(m.key, reelLang());
   $("moment-video").src = src;
   $("moment-download").href = src;
@@ -860,7 +865,7 @@ async function shareMoment(m) {
   // television or a laptop, a QR code takes it to the fan's phone to post from there
   const r = await fetch("/api/share", {
     method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ match: state.match.match_id, aspect: cut.aspect, key: m.key, lang }),
+    body: JSON.stringify({ match: state.match.match_id, aspect: cut.aspect, key: m.key, lang, described: described.on }),
   });
   if (!r.ok) return;
   const path = (await r.json()).url;
@@ -953,6 +958,19 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   $("cue-evidence").addEventListener("click", () => { state.lastShown = state.shown || state.lastShown; showEvidence(); });
   $("play").addEventListener("click", () => setPlaying(!state.playing));
+  const showDescribed = () => {
+    $("ad-toggle").setAttribute("aria-pressed", String(described.on));
+    $("ad-toggle").setAttribute("aria-label", described.on ? "Audio description on" : "Audio description off");
+  };
+  showDescribed();
+  $("ad-toggle").addEventListener("click", () => {
+    described.on = !described.on;
+    try { localStorage.setItem("matchcut.ad", described.on ? "1" : "0"); } catch { /* not remembered */ }
+    showDescribed();
+    for (const li of reel.items.values()) li.remove();
+    reel.items.clear(); // the reel lists the described films' own QA verdicts
+    refreshReel();
+  });
   $("sound").addEventListener("click", () => {
     state.sound = !state.sound;
     $("sound").setAttribute("aria-pressed", String(state.sound));

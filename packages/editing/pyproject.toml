@@ -3,7 +3,9 @@ name = "matchcut-editing"
 version = "0.1.0"
 description = "Every fan's cut: the Editor's film plan, the sound mix and the assembly of a cut from pre-rendered clips."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "num2words>=0.5.14",
+]
 
 [build-system]
 requires = ["hatchling>=1.25"]

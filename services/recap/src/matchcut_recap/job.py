@@ -86,6 +86,7 @@ def make_args(req: dict[str, Any], out: Path) -> Namespace:
         quality=None,
         chunk=int(req.get("chunk", 0)),
         chunks=int(req.get("chunks", 1)),
+        described=bool(req.get("described")),
     )
 
 
@@ -341,7 +342,9 @@ def _json(blobs: Any, name: str, value: dict[str, Any]) -> None:
 
 def render_fan(blobs: Any, req: dict[str, Any], senses: Any = None, data: Path | None = None) -> None:
     """One fan's film for a Recap Factory run: joined from the match's pieces, its soundtrack
-    mixed in their language, checked by the QA agent, and its time and cost recorded."""
+    mixed in their language, checked by the QA agent, and its time and cost recorded. Where the
+    match has an audio description, the same pictures are mixed again with it (the described
+    film for blind and partially sighted fans) and checked too."""
     from matchcut_editing.assembly import assemble_cut, fan_cut, piece_files  # noqa: PLC0415
     from matchcut_editing.factory import cost, root  # noqa: PLC0415
     from matchcut_editing.inputs import load  # noqa: PLC0415
@@ -365,21 +368,34 @@ def render_fan(blobs: Any, req: dict[str, Any], senses: Any = None, data: Path |
             blobs.download_blob(piece_blob(match, aspect, name)).readinto(f)
         pieces.append(local)
     film = assemble_cut(cut, pieces, data / "media", CROWD, work / "out")
+    inp = load(data, match, lang)
+    described = None
+    if inp.descriptions:
+        ad_cut = fan_cut(data, match, focus, lang, aspect, manifest, described=True)
+        described = (ad_cut, assemble_cut(ad_cut, pieces, data / "media", CROWD, work / "out-ad"))
     made = time.time()
     usage: dict[str, float] = {}
-    if senses is None:
-        report = {"passed": False, "error": "no QA agent on this replica"}
-    else:
+
+    def check(c: Any, f: Path, said: list[dict]) -> dict[str, Any]:
+        if senses is None:
+            return {"passed": False, "error": "no QA agent on this replica"}
         try:
-            inp = load(data, match, lang)
-            report = qa_film(
-                film, cut, inp.cues, inp.calls, lang, senses, league_names(inp.feed), usage
-            ).as_dict()
+            return qa_film(f, c, inp.cues, said, lang, senses, league_names(inp.feed), usage).as_dict()
         except Exception as exc:  # perception down is a flagged film, not a lost one
-            report = {"passed": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
+            return {"passed": False, "error": f"{type(exc).__name__}: {exc}"[:300]}
+
+    report = check(cut, film, inp.calls)
     with film.open("rb") as f:
         blobs.upload_blob(f"{base}.mp4", f, overwrite=True)
     _json(blobs, f"{base}.qa.json", report)
+    ad: dict[str, Any] | None = None
+    if described:
+        ad_report = check(described[0], described[1], inp.calls + inp.descriptions)
+        with described[1].open("rb") as f:
+            blobs.upload_blob(f"{base}.ad.mp4", f, overwrite=True)
+        _json(blobs, f"{base}.ad.qa.json", ad_report)
+        lines = sum(1 for e in described[0].audio if e.role == "describe")
+        ad = {"qa": summary(ad_report), "lines": lines, "size": described[1].stat().st_size}
     finished = time.time()
     vcpu = float(os.environ.get("MATCHCUT_REPLICA_VCPU", "4"))
     gib = float(os.environ.get("MATCHCUT_REPLICA_GIB", "8"))
@@ -398,6 +414,7 @@ def render_fan(blobs: Any, req: dict[str, Any], senses: Any = None, data: Path |
             "usage": {k: round(v, 1) for k, v in usage.items()},
             "cost": cost(finished - BOOT, vcpu, gib, usage),
             "qa": summary(report),
+            "ad": ad,
         },
     )
 

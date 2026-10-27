@@ -98,14 +98,24 @@ def piece_files(cut: Cut) -> list[str]:
     return [f"{key}.{cut.language}.mp4" for key in cut.clip_order()]
 
 
-def fan_cut(data: Path, match: str, focus: dict[str, str], lang: str, aspect: str, manifest: dict) -> Cut:
-    """Plan a fan's cut against the pieces' manifest (the replay packages the Studio measured)."""
+def fan_cut(
+    data: Path,
+    match: str,
+    focus: dict[str, str],
+    lang: str,
+    aspect: str,
+    manifest: dict,
+    described: bool = False,
+) -> Cut:
+    """Plan a fan's cut against the pieces' manifest (the replay packages the Studio measured);
+    `described`: with the audio description for blind and partially sighted fans."""
     inp = load(data, match, lang)
     packages = {int(t): d for t, d in manifest["packages"].items()}
     return build_cut(
         inp.feed, inp.cues, inp.calls, focus=focus, language=lang, aspect=aspect,
         package_durations=packages, clip_durations=inp.durations,
         language_name=LANGUAGE_NAMES.get(lang, lang),
+        descriptions=inp.descriptions if described else None,
     )  # fmt: skip
 
 

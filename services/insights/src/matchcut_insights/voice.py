@@ -18,6 +18,7 @@ import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 from xml.sax.saxutils import escape
 
 import httpx
@@ -40,8 +41,18 @@ SCORE_SPEECH = {
 SPELL = {"xG": "x G", "PPDA": "P P D A"}
 
 
-def ssml(text: str, lang: str, voice: str, style: str | None = None, lift: bool = False) -> str:
-    """Build SSML for one line: escape, mark up scores and abbreviations, then set the delivery."""
+def ssml(
+    text: str,
+    lang: str,
+    voice: str,
+    style: str | None = None,
+    lift: bool = False,
+    rate: str | None = None,
+    tight: bool = False,
+) -> str:
+    """Build SSML for one line: escape, mark up scores and abbreviations, then set the delivery.
+    rate: a pace of its own (the describer's); tight: no silence before or after the words, so a
+    line fits the gap it is placed in."""
     sep, zero = SCORE_SPEECH.get(lang, (" ", None))
 
     def say_score(m: re.Match[str]) -> str:
@@ -52,7 +63,9 @@ def ssml(text: str, lang: str, voice: str, style: str | None = None, lift: bool 
     for written, spoken in SPELL.items():
         body = body.replace(written, f'<sub alias="{spoken}">{written}</sub>')
     locale = voice.split("-", 2)[0] + "-" + voice.split("-", 2)[1]
-    if lift:  # a build-up call: the voice rises and quickens as the chance opens up
+    if rate:
+        body = f'<prosody rate="{rate}">{body}</prosody>'
+    elif lift:  # a build-up call: the voice rises and quickens as the chance opens up
         body = f'<prosody rate="+12%" pitch="+6%">{body}</prosody>'
     elif (
         not style and ":" not in voice
@@ -60,6 +73,11 @@ def ssml(text: str, lang: str, voice: str, style: str | None = None, lift: bool 
         body = f'<prosody rate="+6%">{body}</prosody>'
     if style:
         body = f'<mstts:express-as style="{style}">{body}</mstts:express-as>'
+    if tight:
+        body = (
+            '<mstts:silence type="Leading-exact" value="0ms"/>'
+            '<mstts:silence type="Tailing-exact" value="0ms"/>' + body
+        )
     return (
         f'<speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" '
         f'xmlns:mstts="http://www.w3.org/2001/mstts" xml:lang="{locale}">'
@@ -132,6 +150,85 @@ class AzureSpeech:
         r.raise_for_status()
         return r.content, key
 
+    def synthesize_with(self, text: str, lang: str, voice: str) -> bytes:
+        """One line in a named neural voice, read plainly (the describer: calm, never styled)."""
+        for attempt in range(6):  # a burst of lines can be throttled: wait and try again
+            r = self.client.post(
+                self.url,
+                content=ssml(text, lang, voice, rate=DESCRIBER_RATE, tight=True).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer aad#{self.resource_id}#{self.token()}",
+                    "Content-Type": "application/ssml+xml",
+                    "X-Microsoft-OutputFormat": OUTPUT_FORMAT,
+                    "User-Agent": "matchcut",
+                },
+            )
+            if r.status_code != 429 or attempt == 5:
+                r.raise_for_status()
+                return r.content
+            time.sleep(min(30, 2**attempt))
+        raise AssertionError("unreachable")
+
+
+TTS_USD_PER_CHAR = 16 / 1_000_000  # neural text to speech (S1), list price
+UNCONFIRMED_LIMIT_USD = 1.0  # a voicing batch above this asks for --yes first
+
+
+def billable_chars(text: str, lang: str, voice: str, **delivery: Any) -> int:
+    """What Speech bills for one line: every character of the SSML inside <voice>, markup
+    included (only the <speak> and <voice> tags are free). The describer's pace and silence
+    markup is longer than most of its lines, which made the first voicing about 3x the estimate."""
+    body = ssml(text, lang, voice, **delivery)
+    inner = body[body.index(">", body.index("<voice")) + 1 : body.rindex("</voice>")]
+    return len(inner)
+
+
+def voice_descriptions(
+    descs: list,
+    match_id: str,
+    speech: AzureSpeech,
+    media_root: str | Path,
+    workers: int = 8,
+    confirm: Callable[[float, int], bool] | None = None,
+) -> int:
+    """Voice audio-description lines (see describe.py) with each language's describer voice, in
+    parallel, cached like the calls: only new or reworded lines are synthesised."""
+    from concurrent.futures import ThreadPoolExecutor  # noqa: PLC0415
+
+    from matchcut_insights.describe import VOICES  # noqa: PLC0415 - avoids an import cycle
+
+    folder = Path(media_root) / "audio" / match_id
+    manifest = _read_manifest(folder)
+    todo = []
+    for d in descs:
+        voice = VOICES.get(d.language)
+        if voice is None:
+            continue
+        key = f"azure:{voice}+describer{DESCRIBER_RATE}"  # the delivery is part of what a file says
+        rel = Path("audio") / match_id / f"{d.desc_id}.mp3"
+        d.audio, d.voice = rel.as_posix(), key
+        if not ((Path(media_root) / rel).is_file() and manifest.get(d.desc_id) == cache_key(key, d.text)):
+            todo.append((d, voice, key))
+
+    chars = sum(
+        billable_chars(d.text, d.language, voice, rate=DESCRIBER_RATE, tight=True) for d, voice, _key in todo
+    )
+    cost = chars * TTS_USD_PER_CHAR
+    if todo and confirm is not None and not confirm(cost, len(todo)):
+        raise SystemExit(f"not voiced: {len(todo)} lines, {chars} billable characters, about US${cost:.2f}")
+
+    def work(item: tuple) -> tuple:
+        d, voice, key = item
+        return d, key, speech.synthesize_with(d.text, d.language, voice)
+
+    folder.mkdir(parents=True, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for d, key, audio in pool.map(work, todo):
+            (Path(media_root) / d.audio).write_bytes(audio)
+            manifest[d.desc_id] = cache_key(key, d.text)
+    (folder / MANIFEST).write_text(json.dumps(manifest, indent=1, sort_keys=True), encoding="utf-8")
+    return sum(1 for d in descs if d.audio)
+
 
 def voice_key(lang: str, kind: str = "", live: bool = False) -> str | None:
     """The voice and mood for a line, e.g. 'azure:en-GB-Harry:MAI-Voice-2.1#joyful'."""
@@ -145,6 +242,7 @@ def voice_key(lang: str, kind: str = "", live: bool = False) -> str | None:
     return f"{voice}#{mood}" if mood else voice
 
 
+DESCRIBER_RATE = "+30%"  # describers speak briskly: a line has to fit between the calls
 MANIFEST = "voices.json"  # cue ID -> voice and words, so only a changed voice or line is voiced again
 
 

@@ -36,6 +36,7 @@ COPY --from=studio /studio/dist /app/apps/studio/dist
 COPY out/feeds /app/out/feeds
 COPY out/insights /app/out/insights
 COPY out/calls /app/out/calls
+COPY out/describe /app/out/describe
 COPY out/media /app/out/media
 ENV PATH="/app/.venv/bin:$PATH" HOST=0.0.0.0 PORT=8080 MATCHCUT_STUDIO_DIR=/app/apps/studio
 USER 10001

@@ -153,9 +153,9 @@ s.append(
     )
 )
 s.append('<rect x="1460" y="30" width="340" height="66" rx="8" fill="#F6F7F9" stroke="#E1E5EA"/>')
-s.append(text(1474, 52, "Version 2.0 · 25 Oct 2026 · As built", 12, 600, "#3A4350"))
+s.append(text(1474, 52, "Version 2.1 · 26 Oct 2026 · As built", 12, 600, "#3A4350"))
 s.append(text(1474, 70, "Author: Malik Bello · Region: East US 2", 12, 400, MUTED))
-s.append(text(1474, 88, "Related: concept diagram · ADR-0004, 0013, 0014, 0015", 12, 400, MUTED))
+s.append(text(1474, 88, "Related: concept diagram · ADR-0004, 0013 to 0016", 12, 400, MUTED))
 
 # People
 s.append(boundary(40, 130, 190, 330, "People", "#FAFAFB", "#C9CFD7"))
@@ -217,15 +217,16 @@ for i, t in enumerate(
     [
         "draws each moment with the Studio itself",
         "(headless Chromium, CPU), sliced across replicas",
-        "captions it in 7 languages, mixes each film",
+        "captions it in 7 languages, mixes each film,",
+        "and again with audio description",
         "QA agent: hears the film, reads its captions,",
         "measures loudness; code judges",
         "Recap Factory: one fan's film per replica,",
         "checked and priced",
     ]
 ):
-    bullet = i in (0, 2, 3, 5)
-    s.append(text(886, 372 + i * 22, ("• " if bullet else "  ") + t, 12, 400, "#2B3240"))
+    bullet = i in (0, 2, 4, 6)
+    s.append(text(886, 366 + i * 21, ("• " if bullet else "  ") + t, 12, 400, "#2B3240"))
 
 # Storage account
 s.append(
@@ -257,7 +258,7 @@ s.append(
         1364,
         470,
         "Azure AI Speech",
-        ["neural voices for calls and lines", "fast transcription: QA hears each film"],
+        ["neural voices: calls, lines, audio description", "fast transcription: QA hears each film"],
         52,
     )
 )
@@ -288,7 +289,7 @@ s.append(
         h=80,
     )
 )
-s.append(chip(760, 1005, 150, "voices", "calls + verified lines", h=80))
+s.append(chip(760, 1005, 150, "voices", ["calls · verified lines", "audio description"], h=80))
 s.append(chip(950, 1005, 330, "match package", "feed · verified cues · calls · voices", h=80))
 s.append(chip(470, 1120, 250, "League Memory", "MCP server · read-only SQL · SQLite"))
 s.append(chip(950, 1120, 330, "docker build", "Studio bundle + package + services → images"))
@@ -351,7 +352,7 @@ steps = [
     "1  sim plays the match: events and 10 Hz tracking",
     "2  agents write each moment's line on gpt-5-mini",
     "3  the Historian asks League Memory over MCP",
-    "4  verified lines and calls are voiced by Azure AI Speech",
+    "4  calls, verified lines and audio description voiced (Speech)",
     "5  the match package: feed, verified cues, calls, voices",
     "6  images are built and pushed to the registry",
     "7  the app and job pull images with the managed identity",

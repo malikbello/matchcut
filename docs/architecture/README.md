@@ -12,7 +12,7 @@ Before kick-off, on the build machine (a batch run of the match pipeline):
 1. `sim` plays the match: events and 10 Hz tracking.
 2. The insights agents (Microsoft Agent Framework) write each moment's line on Foundry gpt-5-mini, with Entra tokens.
 3. The Historian asks League Memory over MCP (read-only, parameterised SQL on five seasons).
-4. Code verifies every number; verified lines and play-by-play calls are voiced by Azure AI Speech.
+4. Code verifies every number; verified lines, play-by-play calls and the audio description (code-built descriptions of the play, for blind and partially sighted fans, ADR-0016) are voiced by Azure AI Speech.
 5. The match package: tracking feed, verified cues, calls and voices.
 6. Images (Studio bundle, match package, services) are built and pushed to Azure Container Registry.
 
