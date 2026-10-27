@@ -4,6 +4,16 @@
 
 **Live on Azure Container Apps:** https://ca-matchcut-studio.livelygrass-1374f622.eastus2.azurecontainerapps.io (the access code is in the submission's testing instructions). The Recap Factory is at `/factory.html`.
 
+## See it
+
+| The goal, as Matchcut renders and verifies it | One goal, four fans, four languages |
+|---|---|
+| ![Quinouani's 74th-minute goal with its verified line](docs/media/goal.gif) | ![The same moment in English, Pidgin, French and Arabic fans' films](docs/media/languages.gif) |
+| **A fan's reel: follow a player, switch to Pidgin, press Play** | **The Recap Factory: 42 films on Azure Container Apps** |
+| ![Following Quinouani, switching to Pidgin and playing the film](docs/media/reel.gif) | ![Twenty replicas making every fan's film, each checked by the QA agent](docs/media/factory.gif) |
+
+All four are recorded from the live deployment. The films have sound (calls, analysts, the describer); these loops are silent.
+
 ## Try it (about 3 minutes, the same steps as the demo video)
 
 1. Open the live link and enter the access code from the submission's testing instructions.
