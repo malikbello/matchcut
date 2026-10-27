@@ -6,6 +6,10 @@
 
 ## See it
 
+[![Watch the 1:53 demo film on YouTube](https://img.youtube.com/vi/7ei7k6i2XI0/maxresdefault.jpg)](https://youtu.be/7ei7k6i2XI0)
+
+**[Watch the demo film (1:53)](https://youtu.be/7ei7k6i2XI0)**: the goal as Matchcut renders it, then a fan's path through the live product step by step, the Recap Factory at full time, and how it is built.
+
 | The goal, as Matchcut renders and verifies it | One goal, four fans, four languages |
 |---|---|
 | ![Quinouani's 74th-minute goal with its verified line](docs/media/goal.gif) | ![The same moment in English, Pidgin, French and Arabic fans' films](docs/media/languages.gif) |
