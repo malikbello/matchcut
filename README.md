@@ -1,5 +1,7 @@
 # Matchcut
 
+> 🏆 **Winner, Best Use of Microsoft Foundry** at the [Inside the Game Developer Hackathon](https://techcommunity.microsoft.com/blog/azure-events/announcing-the-inside-the-game-developer-hackathon-winners/4574639), presented by Microsoft and the Premier League, out of 804 projects from 2,031 developers. Announced at Microsoft Ignite 2026.
+
 **Every fan's cut.** Matchcut turns a live stream of synthetic football events into verified, explainable insight on a broadcast-style 3D show. Minutes after the final whistle, it gives every fan their own voiced, captioned highlights film: their club, their player, their language, and an audio-described version for blind and partially sighted fans. Every film is watched and heard by a QA agent before any fan sees it.
 
 **Live on Azure Container Apps:** https://ca-matchcut-studio.livelygrass-1374f622.eastus2.azurecontainerapps.io (the access code is in the submission's testing instructions). The Recap Factory is at `/factory.html`.
